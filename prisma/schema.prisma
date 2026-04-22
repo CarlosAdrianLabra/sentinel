@@ -1,0 +1,140 @@
+// Schema de Sentinel — capa externa de control operacional
+// Documentación: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// -------------------------------------------------------------------
+// CATÁLOGO MAESTRO
+// -------------------------------------------------------------------
+
+/// Sucursales operativas. Puente entre las unidades del negocio
+/// (Abryl, Tezonco, e-commerce) y los IDs del sistema INVENSHOES.
+model Branch {
+  id              Int      @id @default(autoincrement())
+  code            String   @unique          // ABRYL | TEZONCO | ECOMM
+  name            String                    // "Abryl" (nombre operativo)
+  legacyStoreId   String   @unique          // "1", "2", "5"
+  legacyStoreName String?                   // "Adrian Granados Del Llano"
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  positions InventoryPosition[]
+  movements InventoryMovement[]
+}
+
+/// SKU: el producto completo tal como se distingue en el negocio.
+/// fullDescription es la llave de negocio. Los campos descompuestos
+/// (brand, modelNumber, gender, material, color) se llenan al parsear
+/// la descripción — si el parseo falla para un producto raro, se
+/// guarda solo con fullDescription y los demás en null.
+model Product {
+  id              Int      @id @default(autoincrement())
+  fullDescription String   @unique          // "CHARLY-79340-NIÑO-SINTETICO-BLANCO"
+
+  brand       String?                       // "CHARLY"
+  modelNumber String?                       // "79340"
+  gender      String?                       // NIÑO | NIÑA | DAMA | CABALLERO | JOVEN | BEBE | UNISEX | VARIOS
+  material    String?                       // SINTETICO | PIEL | TEXTIL | ...
+  color       String?                       // "BLANCO" | "BLANCO/NEGRO"
+
+  isActive  Boolean  @default(true)         // false = marcado con * en el legacy
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  positions InventoryPosition[]
+  movements InventoryMovement[]
+
+  @@index([brand])
+  @@index([modelNumber])
+}
+
+// -------------------------------------------------------------------
+// ESTADO E HISTORIAL DE INVENTARIO
+// -------------------------------------------------------------------
+
+/// Posición actual de inventario por sucursal + producto + talla.
+/// Una fila por cada combinación única. La llave compuesta impide
+/// duplicados desde la DB.
+model InventoryPosition {
+  id        Int      @id @default(autoincrement())
+  branchId  Int
+  productId Int
+  size      String                          // "17.5", "27.0"
+  quantity  Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  branch  Branch  @relation(fields: [branchId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([branchId, productId, size])
+  @@index([productId])
+  @@index([branchId])
+}
+
+/// Log append-only de cada cambio de inventario. No se actualiza
+/// ni se borra: los errores se compensan con movimientos inversos.
+/// referenceId puede apuntar a un ImportJob, un folio externo, etc.
+model InventoryMovement {
+  id            Int      @id @default(autoincrement())
+  branchId      Int
+  productId     Int
+  size          String
+  movementType  String                      // IN | OUT | ADJUSTMENT | IMPORT_SET
+  quantityDelta Int                         // puede ser negativo
+  reason        String?
+  referenceId   String?                     // id de ImportJob, folio, etc.
+  createdAt     DateTime @default(now())
+
+  branch  Branch  @relation(fields: [branchId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([branchId, productId, size])
+  @@index([createdAt])
+}
+
+// -------------------------------------------------------------------
+// OBSERVABILIDAD
+// -------------------------------------------------------------------
+
+/// Registro genérico de eventos de sistema: imports iniciados,
+/// configs cambiadas, etc. Distinto de InventoryMovement: ese es
+/// específico de inventario, este es todo lo demás.
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  action     String                         // "import.started", "branch.updated"
+  entityType String?                        // "Product" | "Branch" | "ImportJob"
+  entityId   String?                        // id como string por flexibilidad
+  actor      String?                        // "system" | "manual" | <usuario futuro>
+  metadata   String?                        // JSON serializado
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+/// Estado y metadata de cada importación desde el legacy.
+/// Un import que genera movimientos deja su id en InventoryMovement.referenceId,
+/// lo que permite revertir o auditar un import completo.
+model ImportJob {
+  id            Int       @id @default(autoincrement())
+  source        String                      // "legacy_inventory" | "legacy_sales"
+  status        String                      // PENDING | RUNNING | COMPLETED | FAILED
+  fileName      String?
+  totalRows     Int?
+  processedRows Int?
+  errorMessage  String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}

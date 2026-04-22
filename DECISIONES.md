@@ -36,6 +36,8 @@ Actualizar cada vez que se tome una decisión arquitectónica nueva.
 - Debugging siempre lo hace Carlos — Claude guía con preguntas, no da la solución directa.
 - Carlos debe parar y preguntar cuando algo no le cuadra, no asentir para avanzar.
 - Claude avisa cuando perciba pérdida de contexto o calidad reducida.
+- Después de correr código, Carlos compara el resultado con su predicción antes de seguir.
+  El contraste predicción/realidad es donde se construye intuición.
 
 ---
 
@@ -129,7 +131,10 @@ Tres formas de identificar:
 ### `InventoryMovement`
 
 - Append-only (nunca se edita ni borra; errores se compensan con movimientos inversos).
-- `movementType` como String validado por Zod: `IN | OUT | ADJUSTMENT | IMPORT_SET`.
+- `movementType` como String validado por Zod: `IN | OUT | ADJUSTMENT | IMPORT_SET`. Los traspasos entre sucursales se modelan como dos movimientos con
+  el mismo `referenceId`: un `OUT` en la sucursal origen + un `IN` en
+  la sucursal destino. El `referenceId` compartido los vincula como
+  una sola operación lógica.
 - `quantityDelta` puede ser negativo.
 - `referenceId` apunta a ImportJob.id u otros folios externos.
 
@@ -157,6 +162,17 @@ Tres formas de identificar:
 
 Las sucursales viven en `lib/constants/branches.ts` como constante y se siembran con `prisma/seed.ts`.
 
+**Nota sobre ECOMM (branch 5 / Sport Tenis):**
+ECOMM no es una bodega física. Es un canal de ventas llevado por un
+distribuidor externo (Sport Tenis) que acepta vales de despensa y
+entrega al cliente final. En el legacy, las ventas de e-commerce se
+registran como _traspaso_ de ABRYL o TEZONCO hacia ECOMM — indicando
+que el zapato físico salió de la bodega de la tienda y ahora está
+asignado al distribuidor, pendiente de entrega. Semánticamente, el
+"stock de ECOMM" es inventario consignado/en-tránsito, no bodega
+propia. Esto afecta cómo se interpretan los archivos de existencias
+de ECOMM y cómo se modelan los movimientos de venta de e-commerce.
+
 ---
 
 ## 8. Formato del legacy INVENSHOES
@@ -177,6 +193,30 @@ MARCA-MODELO-GENERO-MATERIAL-COLOR
 
 **Tallas en el legacy:** vienen como enteros en centésimas (`1750` = talla 17.5). El parser normaliza.
 
+**Formato de archivos de existencias (observado en CHARLYEXISTENCIA.xlsx):**
+
+- NO es tabular. Es un reporte tipo Crystal Reports.
+- Dos hojas: "Mapa del documento" (TOC auto-generado, se ignora) y
+  la hoja de datos real (nombre tipo `rptNewInventarioGlobal...`).
+- Header del archivo (~14 filas): metadatos como `Sucursal:`,
+  filtros aplicados (Marca, Proveedor, etc.), fecha de impresión,
+  cantidad total, importe total.
+- Después del header, bloques repetitivos de ~4 filas por producto:
+  1. Fila con `fullDescription` del producto (en columna 1).
+  2. Header de tallas: `SUC. CANT. COSTO IMPORTE` + columnas de tallas.
+  3. Fila(s) de datos: sucursal, cantidad, costo, importe, cantidades por talla.
+  4. Fila `TOT.` con totales.
+- Las columnas de tallas **varían por producto** (niños 11.0-21.0,
+  adultos 25.0-31.0). El parser debe leer la fila header de cada
+  producto para mapear columna → talla.
+- Un archivo exportado filtrado por sucursal contiene solo esa sucursal
+  (la sucursal está en el header, no por fila). Un archivo multi-sucursal
+  presumiblemente tiene múltiples filas de datos por producto — formato
+  pendiente de confirmar cuando tengamos un archivo real.
+- Timestamp "Impresión: DD/MM/YYYY HH:MM" en el header indica el momento
+  del snapshot. El parser debe capturarlo en el `ImportJob`, no usar
+  `new Date()` al importar.
+
 ---
 
 ## 9. Fases completadas
@@ -187,23 +227,33 @@ MARCA-MODELO-GENERO-MATERIAL-COLOR
 - **Fase 4** — Schema del dominio aplicado (6 entidades). SQL leído y entendido.
 - **Fase 5** — Seed de sucursales funcional e idempotente. Reto extra: script reset.ts escrito por Carlos.
 - **Fase 6** — Servicio `lib/services/branches.ts` + endpoint `GET /api/branches` funcionando. Separación servicio/handler validada. Respuesta envuelta en `{ branches: [...] }`. Manejo de errores con try/catch en el handler, log autodescriptivo, status 500 con mensaje sanitizado. Verificado en navegador en localhost:3000/api/branches.
+- **Fase 7** — Primera UI: `app/branches/page.tsx` como Server Component que llama `listBranches()` directo (sin pasar por fetch a la API). Decisión arquitectónica: Server Components consumen servicios internos; la API route queda para consumidores externos (app móvil futura, integraciones, terceros). Error handling delegado a Next.js (sin try/catch en la página; `error.tsx` pendiente). Estilado con Tailwind puro: jerarquía de texto (h1/h2/p con `text-3xl`, `text-xl`, `text-sm`), tarjetas con `border rounded-lg p-4`, separación entre tarjetas con `space-y-4`, padding de página con `p-8`. Preflight de Tailwind entendido: resetea defaults del navegador, hay que estilizar explícitamente. Dark mode automático vía `prefers-color-scheme` del layout raíz — `text-gray-400` elegido para legibilidad en modo oscuro (solución temporal hasta sistema de temas explícito).
 
 ## 10. Fase actual
 
-**Fase 7 — Primera UI: página que lista sucursales**
+**Fase 8 — Parser de existencias desde Excel legacy.**
 
-Arquitectura prevista:
+Alcance del MVP:
 
-- `app/branches/page.tsx` — Server Component que renderiza las sucursales.
-- Estilado con Tailwind (shadcn/ui aún no instalado, decisión pendiente).
+- Script standalone: `pnpm tsx scripts/import-existencias.ts <archivo.xlsx>`.
+- Maneja formato observado en CHARLYEXISTENCIA.xlsx (un archivo = una sucursal).
+- Importa todos los productos (activos e inactivos, `isActive` derivado del `*`).
+- Crea `InventoryPosition` con `quantity` incluso cuando es 0
+  (decisión: mantener posiciones esparsas para simplificar updates futuros).
+- Ignora costo por ahora (fuera del MVP, queda como ejercicio futuro).
+- Captura la fecha del snapshot del header del archivo.
+- Persiste en `ImportJob` + `InventoryMovement` de tipo `IMPORT_SET`.
+- Validación con Zod en cada frontera.
 
-Decisión abierta de entrada en Fase 7: ¿la página consume `/api/branches` vía fetch, o llama directo al servicio `listBranches()`? Trade-offs de performance y arquitectura por discutir.
+Fuera del alcance:
 
-Siguiente fase después: Fase 8 — por definir (posiblemente parser de imports desde Excel legacy, o detalle de sucursal).
+- UI de import (Fase 9+).
+- Archivos multi-sucursal (cuando tengamos uno para inspeccionar).
+- Archivos de ECOMM/branch 5 (semántica distinta, ver Sección 7).
+- Otros tipos de archivos (ventas, compras): fases posteriores.
 
 ## 11. Decisiones pendientes / preguntas abiertas
 
-- Formato de archivo de import (CSV vs XLSX): no decidido. Primer import real aún no ocurre.
 - Estrategia de conflicto entre legacy y Sentinel: ¿legacy gana, Sentinel gana, o se marca conflicto? Decidir antes del primer import real.
 - Si Prisma 7 tendrá un comportamiento distinto en algún aspecto: verificar contra la documentación siempre que parezca contradictorio con Prisma 6.
 
@@ -229,3 +279,7 @@ Siguiente fase después: Fase 8 — por definir (posiblemente parser de imports 
 - `pnpm prisma studio` para inspeccionar DB visualmente (corre en localhost:5555 o similar).
 - `pnpm prisma db seed` corre `prisma/seed.ts`.
 - `pnpm tsx prisma/reset.ts` corre el script de reset (no hay comando Prisma built-in para esto).
+- **Repo en GitHub:** https://github.com/CarlosAdrianLabra/sentinel (privado).
+  Remoto configurado como `origin`, rama `main`. Flujo: `git add . && git status && git commit -m "..." && git push`.
+  Convención de mensajes: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:` + scope opcional.
+  Pasar a público cuando el proyecto esté presentable (README para reclutadores).

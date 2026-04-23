@@ -1,5 +1,5 @@
 type BranchSeed = {
-  code: "ABRYL" | "TEZONCO" | "ECOMM";
+  code: "ABRYL" | "TEZONCO" | "ECOMM" | "MARISOL";
   name: string;
   legacyStoreId: string;
   legacyStoreName: string;
@@ -23,5 +23,11 @@ export const BRANCHES: ReadonlyArray<BranchSeed> = [
     name: "e-commerce",
     legacyStoreId: "5",
     legacyStoreName: "Sport Tenis",
+  },
+  {
+    code: "MARISOL",
+    name: "Marisol",
+    legacyStoreId: "4",
+    legacyStoreName: "Marisol",
   },
 ];

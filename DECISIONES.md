@@ -106,16 +106,16 @@ sentinel/
 
 ---
 
-## 6. Schema del dominio — 6 entidades
-
 ### `Branch` — sucursales
 
-Tres formas de identificar:
+Campos:
 
 - `id` (Int) — identidad técnica interna.
-- `code` (String, @unique) — identidad operativa estable ("ABRYL", "TEZONCO", "ECOMM").
-- `legacyStoreId` (String, @unique) — puente con INVENSHOES ("1", "2", "5").
-- `legacyStoreName` (String?, opcional) — nombre como aparece en el legacy.
+- `code` (String, @unique) — identidad operativa estable ("ABRYL", "TEZONCO", "ECOMM", "MARISOL").
+- `name` (String) — nombre operativo corto para mostrar en UI ("Abryl", "Tezonco", "e-commerce", "Marisol"). Distinto de `legacyStoreName`.
+- `legacyStoreId` (String, @unique) — puente con INVENSHOES ("1", "2", "4", "5").
+- `legacyStoreName` (String?, opcional) — nombre como aparece en el legacy (ej. "Adrian Granados Del Llano").
+- `isActive` (Boolean, default true), `createdAt`, `updatedAt` — metadata estándar.
 
 ### `Product` — SKUs
 
@@ -158,6 +158,7 @@ Tres formas de identificar:
 | --------- | ------------------------- | -------------- | ---------------- |
 | `"1"`     | Adrian Granados Del Llano | `ABRYL`        | Abryl            |
 | `"2"`     | Carlos Del Llano Robles   | `TEZONCO`      | Tezonco          |
+| `"4"`     | Marisol                   | `MARISOL`      | Marisol          |
 | `"5"`     | Sport Tenis               | `ECOMM`        | e-commerce       |
 
 Las sucursales viven en `lib/constants/branches.ts` como constante y se siembran con `prisma/seed.ts`.
@@ -172,6 +173,30 @@ asignado al distribuidor, pendiente de entrega. Semánticamente, el
 "stock de ECOMM" es inventario consignado/en-tránsito, no bodega
 propia. Esto afecta cómo se interpretan los archivos de existencias
 de ECOMM y cómo se modelan los movimientos de venta de e-commerce.
+
+**Nota sobre MARISOL (branch 4):**
+MARISOL no es una bodega física. Es una "sucursal virtual" que el
+legacy usa para representar el estado "apartado". Cuando un cliente
+aparta un zapato en ABRYL o TEZONCO, el legacy hace un traspaso desde
+la sucursal de origen hacia MARISOL; el zapato físicamente sigue en
+la bodega de origen, en una sección designada "apartado", pero el
+reporte de existencias lo cuenta en MARISOL (SUC. 4), NO en la
+sucursal física donde está.
+
+Implicaciones:
+
+- Si alguien pregunta "¿cuántos zapatos tengo físicamente en Abryl?",
+  la respuesta verdadera es `stock(ABRYL) + stock(MARISOL que vino de ABRYL)`.
+- Si el cliente recoge el apartado, se concreta la venta (movimiento OUT en MARISOL).
+- Si no lo recoge, el legacy hace un traspaso inverso MARISOL → sucursal original.
+- El propósito del diseño en el legacy (por qué es una sucursal separada
+  en vez de una marca de "reservado") es desconocido — pendiente de
+  preguntar al operador del legacy.
+
+En Sentinel, por pragmatismo en MVP, MARISOL se modela como una Branch
+más (así viene en los datos). Cuando lleguemos a reportes de
+reconciliación física, probablemente haya que repensarlo (¿MARISOL es
+branch o es un estado?) — decisión diferida.
 
 ---
 

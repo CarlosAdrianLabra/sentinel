@@ -277,6 +277,20 @@ Fuera del alcance:
 - Archivos de ECOMM/branch 5 (semántica distinta, ver Sección 7).
 - Otros tipos de archivos (ventas, compras): fases posteriores.
 
+**Progreso de Fase 8 — parser de existencias:**
+
+- Script `scripts/import-existencias.ts` existe y valida:
+  1. Argumento CLI obligatorio (`process.argv[2]`).
+  2. Abre workbook con `xlsx` (SheetJS).
+  3. Selecciona hoja cuyo nombre empieza con "rpt" (convención INVENSHOES).
+
+- **Dónde retomar:** convertir la hoja seleccionada a array-de-arrays
+  con `XLSX.utils.sheet_to_json(sheet, { header: 1 })`, extraer sucursal
+  y timestamp del header, y empezar a detectar productos por patrón.
+
+- Archivo de desarrollo elegido: `Converse.xlsx` (chiquito, multi-branch,
+  multi-rango-tallas — cubre todos los casos raros).
+
 ## 11. Decisiones pendientes / preguntas abiertas
 
 - Estrategia de conflicto entre legacy y Sentinel: ¿legacy gana, Sentinel gana, o se marca conflicto? Decidir antes del primer import real.

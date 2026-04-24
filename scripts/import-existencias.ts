@@ -13,6 +13,14 @@ if (!filePath) {
     console.log("Archivo recibido:", filePath);
     const workbook = XLSX.readFile(filePath);
     console.log("Hojas encontradas:", workbook.SheetNames);
+    const sheetName = workbook.SheetNames.find((name) =>
+      name.startsWith("rpt"),
+    );
+    if (!sheetName) {
+      console.error("Error: no se encontró ninguna hoja que empiece con 'rpt'");
+      process.exit(1);
+    }
+    console.log("Hoja de datos:", sheetName);
   } catch (error) {
     console.error(
       "Error al leer el archivo:",

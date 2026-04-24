@@ -242,6 +242,27 @@ MARCA-MODELO-GENERO-MATERIAL-COLOR
   del snapshot. El parser debe capturarlo en el `ImportJob`, no usar
   `new Date()` al importar.
 
+**Detalles técnicos observados al parsear Converse.xlsx con `xlsx` (SheetJS):**
+
+- Al convertir la hoja con `sheet_to_json(sheet, { header: 1 })`:
+  - Columna 0 es siempre vacía. Los datos útiles arrancan en columna 1.
+  - Las tallas en la fila header vienen como **strings con padding de
+    espacios** (ej. `"1700      "`), no como números. El parser debe
+    hacer `.trim()` antes de convertir a número.
+  - Celdas vacías aparecen en tres formas: `undefined` (sparse slots,
+    se muestran como `<N empty items>` en Node), `""` (string vacío),
+    `null` (raramente). Los tres casos deben normalizarse con un helper
+    `isEmpty(cell)`.
+- Header "Sucursal: TODAS" aparece en archivos multi-sucursal.
+  El parser NO debe depender del header para obtener la sucursal —
+  siempre debe leer la sucursal de la columna 1 de cada fila de datos.
+- Un bloque de producto puede tener múltiples filas de datos (una por
+  sucursal que tiene stock) antes del `TOT.` de cierre. El parser itera
+  todas las filas entre header y TOT.
+- La fila `TOT.` es redundante para nuestros fines (los totales ya
+  los podemos calcular desde las filas de datos). Se usa solo como
+  marca de "fin de bloque".
+
 ---
 
 ## 9. Fases completadas

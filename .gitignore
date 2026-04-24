@@ -44,3 +44,6 @@ next-env.d.ts
 /generated
 prisma/*.db
 prisma/*.db-journal
+
+# Archivos xlsx locales para pruebas (no committear datos del legacy)
+*.xlsx

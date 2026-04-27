@@ -105,7 +105,24 @@ if (!filePath) {
         const branchLegacyId = blockCell;
         if (typeof branchLegacyId === "number") {
           positionCount++;
-          console.log(`  - Branch ${branchLegacyId} (fila ${j})`);
+
+          // Iterar las claves del mapa de tallas
+          for (const claveStr of Object.keys(sizeByColumn)) {
+            const col = Number(claveStr);
+            const talla = sizeByColumn[col];
+            const cantidadCell = blockRow[col];
+
+            // TU TAREA 1: chequear que cantidadCell sea un número
+            // TU TAREA 2: chequear que sea mayor a 0
+            // TU TAREA 3: si pasa los dos chequeos, imprimir:
+            //   `  - Branch ${branchLegacyId} (fila ${j}): talla ${talla} → ${cantidadCell} par(es)`
+
+            if (typeof cantidadCell === "number" && cantidadCell > 0) {
+              console.log(
+                `  - Branch ${branchLegacyId} (fila ${j}): talla ${talla} → ${cantidadCell} par(es)`,
+              );
+            }
+          }
         }
 
         j++;
@@ -117,8 +134,6 @@ if (!filePath) {
 
     console.log(`\nTotal de productos detectados: ${productCount}`);
     console.log(`Total de filas de datos detectadas: ${positionCount}`);
-
-    console.log(`Total de productos detectados: ${productCount}`);
   } catch (error) {
     console.error(
       "Error al leer el archivo:",

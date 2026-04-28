@@ -1,5 +1,13 @@
 import XLSX from "xlsx";
 
+type InventoryTuple = {
+  branchLegacyId: number;
+  fullDescription: string;
+  isActive: boolean;
+  size: string;
+  quantity: number;
+};
+
 function getFilePathFromArgs(): string {
   const filePath = process.argv[2];
   if (!filePath) {
@@ -41,7 +49,8 @@ function extractSnapshotDate(rows: unknown[][]): string {
   return snapshotDateString;
 }
 
-function parseProducts(rows: unknown[][]): void {
+function parseProducts(rows: unknown[][]): InventoryTuple[] {
+  const tuples: InventoryTuple[] = [];
   let productCount = 0;
   let positionCount = 0;
 
@@ -107,6 +116,19 @@ function parseProducts(rows: unknown[][]): void {
             console.log(
               `  - Branch ${branchLegacyId} (fila ${j}): talla ${talla} → ${cantidadCell} par(es)`,
             );
+
+            const isActive = !productName.endsWith(" *");
+            const fullDescription = isActive
+              ? productName
+              : productName.replace(/ \*$/, "").trim();
+
+            tuples.push({
+              branchLegacyId: branchLegacyId,
+              fullDescription: fullDescription,
+              isActive: isActive,
+              size: talla,
+              quantity: cantidadCell,
+            });
           }
         }
       }
@@ -118,6 +140,8 @@ function parseProducts(rows: unknown[][]): void {
 
   console.log(`\nTotal de productos detectados: ${productCount}`);
   console.log(`Total de filas de datos detectadas: ${positionCount}`);
+
+  return tuples;
 }
 
 function main(): void {
@@ -134,7 +158,12 @@ function main(): void {
     const snapshotDateString = extractSnapshotDate(rows);
     console.log("Fecha del snapshot:", snapshotDateString);
 
-    parseProducts(rows);
+    const tuples = parseProducts(rows);
+
+    const totalPares = tuples.reduce((sum, t) => sum + t.quantity, 0);
+    console.log(`Suma de quantity en tuplas: ${totalPares}`);
+    console.log(`\nPrimera tupla:`, tuples[0]);
+    console.log(`Última tupla:`, tuples[tuples.length - 1]);
   } catch (error) {
     console.error(
       "Error al leer el archivo:",

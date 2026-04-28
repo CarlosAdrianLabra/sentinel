@@ -47,3 +47,6 @@ prisma/*.db-journal
 
 # Archivos xlsx locales para pruebas (no committear datos del legacy)
 *.xlsx
+
+# Outputs de debug del parser
+*.txt

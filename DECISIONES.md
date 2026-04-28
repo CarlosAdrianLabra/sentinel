@@ -300,17 +300,38 @@ Fuera del alcance:
 
 **Progreso de Fase 8 — parser de existencias:**
 
-- Script `scripts/import-existencias.ts` existe y valida:
-  1. Argumento CLI obligatorio (`process.argv[2]`).
-  2. Abre workbook con `xlsx` (SheetJS).
-  3. Selecciona hoja cuyo nombre empieza con "rpt" (convención INVENSHOES).
+Hito alcanzado: el parser convierte un archivo xlsx del legacy en un
+array tipado `InventoryTuple[]` en memoria, listo para validar y
+persistir.
 
-- **Dónde retomar:** convertir la hoja seleccionada a array-de-arrays
-  con `XLSX.utils.sheet_to_json(sheet, { header: 1 })`, extraer sucursal
-  y timestamp del header, y empezar a detectar productos por patrón.
+Implementado:
 
-- Archivo de desarrollo elegido: `Converse.xlsx` (chiquito, multi-branch,
-  multi-rango-tallas — cubre todos los casos raros).
+- Validación de argumento CLI (`process.argv[2]`).
+- Lectura del workbook con `xlsx` (SheetJS).
+- Selección de hoja por convención `rpt*`.
+- Extracción del timestamp del header.
+- Detección de productos por patrón (>=4 guiones en col 1).
+- Soporte de productos multi-rango-tallas (varios bloques `SUC.`).
+- Soporte de archivos multi-branch (varias filas de datos por bloque).
+- Mapeo dinámico columna → talla (normalizada como string "17.0").
+- Detección y limpieza de productos inactivos (terminan con `*`).
+- Construcción de tuplas tipadas: `{ branchLegacyId, fullDescription,
+isActive, size, quantity }`.
+
+Refactor: el script está dividido en funciones puras
+(`getFilePathFromArgs`, `readWorkbook`, `selectDataSheet`,
+`extractSnapshotDate`, `parseProducts`) orquestadas por `main()`.
+
+Verificación: probado con Converse.xlsx (multi-branch, multi-rango),
+CHARLYEXISTENCIA.xlsx (single-branch, 2,246 productos),
+rptNewInvetarioGlobalSinVenta.xlsx (single-branch, 25,052 productos,
+113K filas). En Converse: suma de quantity en tuplas = 514, igual al
+total reportado por el legacy.
+
+**Dónde retomar:** validación con Zod del array de tuplas, después
+persistencia con Prisma (transacción única, ImportJob + InventoryPosition
+
+- InventoryMovement).
 
 ## 11. Decisiones pendientes / preguntas abiertas
 

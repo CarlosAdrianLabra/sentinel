@@ -1,12 +1,15 @@
 import XLSX from "xlsx";
+import { z } from "zod";
 
-type InventoryTuple = {
-  branchLegacyId: number;
-  fullDescription: string;
-  isActive: boolean;
-  size: string;
-  quantity: number;
-};
+const InventoryTupleSchema = z.object({
+  branchLegacyId: z.number().int().positive(),
+  fullDescription: z.string().min(1),
+  isActive: z.boolean(),
+  size: z.string().regex(/^\d+\.\d$/),
+  quantity: z.number().int().nonnegative(),
+});
+
+type InventoryTuple = z.infer<typeof InventoryTupleSchema>;
 
 function getFilePathFromArgs(): string {
   const filePath = process.argv[2];
@@ -144,6 +147,10 @@ function parseProducts(rows: unknown[][]): InventoryTuple[] {
   return tuples;
 }
 
+function validateTuples(tuples: unknown[]): InventoryTuple[] {
+  return z.array(InventoryTupleSchema).parse(tuples);
+}
+
 function main(): void {
   const filePath = getFilePathFromArgs();
   try {
@@ -158,17 +165,25 @@ function main(): void {
     const snapshotDateString = extractSnapshotDate(rows);
     console.log("Fecha del snapshot:", snapshotDateString);
 
-    const tuples = parseProducts(rows);
+    const rawTuples = parseProducts(rows);
+    const tuples = validateTuples(rawTuples);
 
     const totalPares = tuples.reduce((sum, t) => sum + t.quantity, 0);
     console.log(`Suma de quantity en tuplas: ${totalPares}`);
     console.log(`\nPrimera tupla:`, tuples[0]);
     console.log(`Última tupla:`, tuples[tuples.length - 1]);
   } catch (error) {
-    console.error(
-      "Error al leer el archivo:",
-      error instanceof Error ? error.message : error,
-    );
+    if (error instanceof z.ZodError) {
+      console.error("Error de validacion de tuplas:");
+      for (const issue of error.issues) {
+        console.error(` - tupla ${issue.path.join(".")}: ${issue.message}`);
+      }
+    } else {
+      console.error(
+        "Error al leer el archivo:",
+        error instanceof Error ? error.message : error,
+      );
+    }
     process.exit(1);
   }
 }

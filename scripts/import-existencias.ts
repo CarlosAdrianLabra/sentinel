@@ -1,5 +1,12 @@
 import XLSX from "xlsx";
 import { z } from "zod";
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaClient } from "../generated/prisma/client";
+
+const adapter = new PrismaBetterSqlite3({
+  url: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
+});
+const prisma = new PrismaClient({ adapter });
 
 const InventoryTupleSchema = z.object({
   branchLegacyId: z.number().int().positive(),
@@ -151,7 +158,28 @@ function validateTuples(tuples: unknown[]): InventoryTuple[] {
   return z.array(InventoryTupleSchema).parse(tuples);
 }
 
-function main(): void {
+async function buildBranchMap(): Promise<Record<string, number>> {
+  const branches = await prisma.branch.findMany();
+  const map: Record<string, number> = {};
+  for (const branch of branches) {
+    map[branch.legacyStoreId] = branch.id;
+  }
+  return map;
+}
+
+async function createImportJob(filePath: string): Promise<number> {
+  const job = await prisma.importJob.create({
+    data: {
+      source: "legacy_inventory",
+      status: "RUNNING",
+      fileName: filePath,
+      startedAt: new Date(),
+    },
+  });
+  return job.id;
+}
+
+async function main(): Promise<void> {
   const filePath = getFilePathFromArgs();
   try {
     console.log("Archivo recibido:", filePath);
@@ -167,6 +195,83 @@ function main(): void {
 
     const rawTuples = parseProducts(rows);
     const tuples = validateTuples(rawTuples);
+
+    const branchMap = await buildBranchMap();
+    console.log("Mapa de branches (legacyStoreId → id):", branchMap);
+
+    const importJobId = await createImportJob(filePath);
+    console.log(`ImportJob creado con id ${importJobId}`);
+
+    let processedCount = 0;
+
+    await prisma.$transaction(async (tx) => {
+      for (const tuple of tuples) {
+        const branchId = branchMap[String(tuple.branchLegacyId)];
+        if (!branchId) {
+          throw new Error(
+            `Sucursal desconocida: legacyStoreId=${tuple.branchLegacyId}`,
+          );
+        }
+
+        // 1. Upsert Product por fullDescription
+        const product = await tx.product.upsert({
+          where: { fullDescription: tuple.fullDescription },
+          update: { isActive: tuple.isActive },
+          create: {
+            fullDescription: tuple.fullDescription,
+            isActive: tuple.isActive,
+          },
+        });
+
+        // 2. Upsert InventoryPosition por (branchId, productId, size)
+        await tx.inventoryPosition.upsert({
+          where: {
+            branchId_productId_size: {
+              branchId: branchId,
+              productId: product.id,
+              size: tuple.size,
+            },
+          },
+          update: { quantity: tuple.quantity },
+          create: {
+            branchId: branchId,
+            productId: product.id,
+            size: tuple.size,
+            quantity: tuple.quantity,
+          },
+        });
+
+        // 3. Crear InventoryMovement
+        await tx.inventoryMovement.create({
+          data: {
+            branchId: branchId,
+            productId: product.id,
+            size: tuple.size,
+            movementType: "IMPORT_SET",
+            quantityDelta: tuple.quantity,
+            referenceId: String(importJobId),
+          },
+        });
+
+        processedCount++;
+      }
+    });
+
+    // Marcar ImportJob como COMPLETED
+    await prisma.importJob.update({
+      where: { id: importJobId },
+      data: {
+        status: "COMPLETED",
+        finishedAt: new Date(),
+        totalRows: tuples.length,
+        processedRows: processedCount,
+      },
+    });
+
+    console.log(
+      `Import completado. ImportJob ${importJobId} marcado como COMPLETED.`,
+    );
+    console.log(`Productos/posiciones/movements creados: ${processedCount}`);
 
     const totalPares = tuples.reduce((sum, t) => sum + t.quantity, 0);
     console.log(`Suma de quantity en tuplas: ${totalPares}`);
@@ -188,4 +293,11 @@ function main(): void {
   }
 }
 
-main();
+main()
+  .catch((error) => {
+    console.error("Error fatal:", error);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

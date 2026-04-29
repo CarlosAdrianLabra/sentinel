@@ -334,12 +334,22 @@ rptNewInvetarioGlobalSinVenta.xlsx (single-branch, 25,052 productos,
 113K filas). En Converse: suma de quantity en tuplas = 514, igual al
 total reportado por el legacy.
 
-**Dónde retomar:** persistencia con Prisma (transacción única, ImportJob
+**Dónde retomar:**
 
-- upsert de Product + InventoryPosition + InventoryMovement de tipo
-  IMPORT_SET).
-
-* InventoryMovement).
+- Limpiar el ImportJob huérfano id=1 (status RUNNING crónico de pruebas), o
+  decidir dejarlo como ejemplo histórico.
+- Probar con CHARLYEXISTENCIA.xlsx y rptNewInvetarioGlobalSinVenta.xlsx
+  para confirmar que la persistencia escala (2,246 y 25,052 productos).
+- Decisiones pendientes de diseño de imports incrementales:
+  - quantityDelta debería ser diferencia respecto al stock previo, no
+    valor absoluto (hoy guardamos absolute en IMPORT_SET).
+  - snapshotDate del archivo solo se imprime; debería persistirse
+    en ImportJob (campo nuevo o metadata JSON).
+- Manejo del catch para distinguir error de transacción vs error de archivo
+  (similar al de Zod): si la tx falla, marcar el ImportJob como FAILED
+  con errorMessage.
+- Refactor: el código de la transacción está pegado en main(); convendría
+  extraerlo a una función `persistTuples(tuples, branchMap, importJobId)`.
 
 ## 11. Decisiones pendientes / preguntas abiertas
 

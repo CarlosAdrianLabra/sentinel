@@ -317,6 +317,12 @@ Implementado:
 - Detección y limpieza de productos inactivos (terminan con `*`).
 - Construcción de tuplas tipadas: `{ branchLegacyId, fullDescription,
 isActive, size, quantity }`.
+- Validación con Zod: `InventoryTupleSchema` define el contrato runtime
+  (entero positivo, regex de talla "N.N", etc.). El type `InventoryTuple`
+  se infiere del schema con `z.infer` — fuente única de verdad. Función
+  `validateTuples(unknown[])` corre antes de persistir; si Zod tira
+  `ZodError`, el catch lo distingue con `instanceof` y muestra mensajes
+  legibles (`tupla N.campo: mensaje`).
 
 Refactor: el script está dividido en funciones puras
 (`getFilePathFromArgs`, `readWorkbook`, `selectDataSheet`,
@@ -328,10 +334,12 @@ rptNewInvetarioGlobalSinVenta.xlsx (single-branch, 25,052 productos,
 113K filas). En Converse: suma de quantity en tuplas = 514, igual al
 total reportado por el legacy.
 
-**Dónde retomar:** validación con Zod del array de tuplas, después
-persistencia con Prisma (transacción única, ImportJob + InventoryPosition
+**Dónde retomar:** persistencia con Prisma (transacción única, ImportJob
 
-- InventoryMovement).
+- upsert de Product + InventoryPosition + InventoryMovement de tipo
+  IMPORT_SET).
+
+* InventoryMovement).
 
 ## 11. Decisiones pendientes / preguntas abiertas
 

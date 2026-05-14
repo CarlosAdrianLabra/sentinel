@@ -179,6 +179,69 @@ async function createImportJob(filePath: string): Promise<number> {
   return job.id;
 }
 
+async function persistTuples(
+  tuples: InventoryTuple[],
+  branchMap: Record<string, number>,
+  importJobId: number,
+): Promise<number> {
+  let processedCount = 0;
+
+  await prisma.$transaction(async (tx) => {
+    for (const tuple of tuples) {
+      const branchId = branchMap[String(tuple.branchLegacyId)];
+      if (!branchId) {
+        throw new Error(
+          `Sucursal desconocida: legacyStoreId=${tuple.branchLegacyId}`,
+        );
+      }
+
+      // 1. Upsert Product por fullDescription
+      const product = await tx.product.upsert({
+        where: { fullDescription: tuple.fullDescription },
+        update: { isActive: tuple.isActive },
+        create: {
+          fullDescription: tuple.fullDescription,
+          isActive: tuple.isActive,
+        },
+      });
+
+      // 2. Upsert InventoryPosition por (branchId, productId, size)
+      await tx.inventoryPosition.upsert({
+        where: {
+          branchId_productId_size: {
+            branchId: branchId,
+            productId: product.id,
+            size: tuple.size,
+          },
+        },
+        update: { quantity: tuple.quantity },
+        create: {
+          branchId: branchId,
+          productId: product.id,
+          size: tuple.size,
+          quantity: tuple.quantity,
+        },
+      });
+
+      // 3. Crear InventoryMovement
+      await tx.inventoryMovement.create({
+        data: {
+          branchId: branchId,
+          productId: product.id,
+          size: tuple.size,
+          movementType: "IMPORT_SET",
+          quantityDelta: tuple.quantity,
+          referenceId: String(importJobId),
+        },
+      });
+
+      processedCount++;
+    }
+  });
+
+  return processedCount;
+}
+
 async function main(): Promise<void> {
   const filePath = getFilePathFromArgs();
   try {
@@ -202,60 +265,7 @@ async function main(): Promise<void> {
     const importJobId = await createImportJob(filePath);
     console.log(`ImportJob creado con id ${importJobId}`);
 
-    let processedCount = 0;
-
-    await prisma.$transaction(async (tx) => {
-      for (const tuple of tuples) {
-        const branchId = branchMap[String(tuple.branchLegacyId)];
-        if (!branchId) {
-          throw new Error(
-            `Sucursal desconocida: legacyStoreId=${tuple.branchLegacyId}`,
-          );
-        }
-
-        // 1. Upsert Product por fullDescription
-        const product = await tx.product.upsert({
-          where: { fullDescription: tuple.fullDescription },
-          update: { isActive: tuple.isActive },
-          create: {
-            fullDescription: tuple.fullDescription,
-            isActive: tuple.isActive,
-          },
-        });
-
-        // 2. Upsert InventoryPosition por (branchId, productId, size)
-        await tx.inventoryPosition.upsert({
-          where: {
-            branchId_productId_size: {
-              branchId: branchId,
-              productId: product.id,
-              size: tuple.size,
-            },
-          },
-          update: { quantity: tuple.quantity },
-          create: {
-            branchId: branchId,
-            productId: product.id,
-            size: tuple.size,
-            quantity: tuple.quantity,
-          },
-        });
-
-        // 3. Crear InventoryMovement
-        await tx.inventoryMovement.create({
-          data: {
-            branchId: branchId,
-            productId: product.id,
-            size: tuple.size,
-            movementType: "IMPORT_SET",
-            quantityDelta: tuple.quantity,
-            referenceId: String(importJobId),
-          },
-        });
-
-        processedCount++;
-      }
-    });
+    const processedCount = await persistTuples(tuples, branchMap, importJobId);
 
     // Marcar ImportJob como COMPLETED
     await prisma.importJob.update({

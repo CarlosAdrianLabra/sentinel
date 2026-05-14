@@ -336,20 +336,29 @@ total reportado por el legacy.
 
 **Dónde retomar:**
 
-- Limpiar el ImportJob huérfano id=1 (status RUNNING crónico de pruebas), o
-  decidir dejarlo como ejemplo histórico.
-- Probar con CHARLYEXISTENCIA.xlsx y rptNewInvetarioGlobalSinVenta.xlsx
-  para confirmar que la persistencia escala (2,246 y 25,052 productos).
-- Decisiones pendientes de diseño de imports incrementales:
-  - quantityDelta debería ser diferencia respecto al stock previo, no
-    valor absoluto (hoy guardamos absolute en IMPORT_SET).
-  - snapshotDate del archivo solo se imprime; debería persistirse
-    en ImportJob (campo nuevo o metadata JSON).
-- Manejo del catch para distinguir error de transacción vs error de archivo
-  (similar al de Zod): si la tx falla, marcar el ImportJob como FAILED
-  con errorMessage.
-- Refactor: el código de la transacción está pegado en main(); convendría
-  extraerlo a una función `persistTuples(tuples, branchMap, importJobId)`.
+Deudas técnicas completadas hoy:
+
+- ✅ #3 — snapshotDate persistido en ImportJob (DateTime?, parseado con date-fns)
+- ✅ #4 — Manejo de errores: catch con 3 ramas + markImportJobFailed
+- ✅ #5 — Refactor: persistTuples extraída de main()
+
+Pendientes:
+
+- #1 — Limpiar ImportJob huérfano id=1 (status RUNNING crónico de pruebas).
+  Una sola query: `prisma.importJob.delete({ where: { id: 1 } })`.
+- #2 — quantityDelta debería ser diferencia respecto al stock previo, no
+  valor absoluto. Conceptualmente más complejo: requiere leer
+  InventoryPosition.quantity actual antes del upsert, calcular delta,
+  guardarlo en el movement, y entonces escribir el nuevo absoluto.
+
+Otras direcciones posibles para próxima sesión:
+
+- Probar a escala con CHARLYEXISTENCIA.xlsx (2,246 productos) y
+  rptNewInvetarioGlobalSinVenta.xlsx (25,052 productos) para confirmar
+  que la persistencia escala.
+- Empezar UI: página `/imports` que liste los ImportJobs (status, fechas,
+  contadores), instalar shadcn/ui.
+- Otros tipos de import (ventas, compras) requieren diseño formal antes.
 
 ## 11. Decisiones pendientes / preguntas abiertas
 

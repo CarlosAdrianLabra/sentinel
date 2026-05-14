@@ -190,6 +190,20 @@ async function createImportJob(
   });
   return job.id;
 }
+async function markImportJobFailed(
+  importJobId: number,
+  error: unknown,
+): Promise<void> {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  await prisma.importJob.update({
+    where: { id: importJobId },
+    data: {
+      status: "FAILED",
+      finishedAt: new Date(),
+      errorMessage: errorMessage,
+    },
+  });
+}
 
 async function persistTuples(
   tuples: InventoryTuple[],
@@ -256,6 +270,7 @@ async function persistTuples(
 
 async function main(): Promise<void> {
   const filePath = getFilePathFromArgs();
+  let importJobId: number | undefined;
   try {
     console.log("Archivo recibido:", filePath);
     const workbook = readWorkbook(filePath);
@@ -275,7 +290,7 @@ async function main(): Promise<void> {
     console.log("Mapa de branches (legacyStoreId → id):", branchMap);
 
     const snapshotDate = parseSnapshotDate(snapshotDateString);
-    const importJobId = await createImportJob(filePath, snapshotDate);
+    importJobId = await createImportJob(filePath, snapshotDate);
     console.log(`ImportJob creado con id ${importJobId}`);
 
     const processedCount = await persistTuples(tuples, branchMap, importJobId);
@@ -306,12 +321,23 @@ async function main(): Promise<void> {
       for (const issue of error.issues) {
         console.error(` - tupla ${issue.path.join(".")}: ${issue.message}`);
       }
+    } else if (importJobId !== undefined) {
+      console.error(
+        "Error durante la persistencia:",
+        error instanceof Error ? error.message : error,
+      );
     } else {
       console.error(
-        "Error al leer el archivo:",
+        "Error antes de crear el ImportJob:",
         error instanceof Error ? error.message : error,
       );
     }
+
+    if (importJobId !== undefined) {
+      await markImportJobFailed(importJobId, error);
+      console.error(`ImportJob ${importJobId} marcado como FAILED.`);
+    }
+
     process.exit(1);
   }
 }

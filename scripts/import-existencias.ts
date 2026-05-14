@@ -2,6 +2,7 @@ import XLSX from "xlsx";
 import { z } from "zod";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../generated/prisma/client";
+import { parse } from "date-fns";
 
 const adapter = new PrismaBetterSqlite3({
   url: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
@@ -58,7 +59,14 @@ function extractSnapshotDate(rows: unknown[][]): string {
   const snapshotDateString = cellValue.replace("Impresión: ", "").trim();
   return snapshotDateString;
 }
-
+function parseSnapshotDate(raw: string): Date {
+  const normalized = raw.replace("p. m.", "PM").replace("a. m.", "AM");
+  const parsed = parse(normalized, "dd/MM/yyyy hh:mm:ss aa", new Date());
+  if (isNaN(parsed.getTime())) {
+    throw new Error(`No se pudo parsear el snapshot date: "${raw}"`);
+  }
+  return parsed;
+}
 function parseProducts(rows: unknown[][]): InventoryTuple[] {
   const tuples: InventoryTuple[] = [];
   let productCount = 0;
@@ -167,13 +175,17 @@ async function buildBranchMap(): Promise<Record<string, number>> {
   return map;
 }
 
-async function createImportJob(filePath: string): Promise<number> {
+async function createImportJob(
+  filePath: string,
+  snapshotDate: Date,
+): Promise<number> {
   const job = await prisma.importJob.create({
     data: {
       source: "legacy_inventory",
       status: "RUNNING",
       fileName: filePath,
       startedAt: new Date(),
+      snapshotDate: snapshotDate,
     },
   });
   return job.id;
@@ -262,7 +274,8 @@ async function main(): Promise<void> {
     const branchMap = await buildBranchMap();
     console.log("Mapa de branches (legacyStoreId → id):", branchMap);
 
-    const importJobId = await createImportJob(filePath);
+    const snapshotDate = parseSnapshotDate(snapshotDateString);
+    const importJobId = await createImportJob(filePath, snapshotDate);
     console.log(`ImportJob creado con id ${importJobId}`);
 
     const processedCount = await persistTuples(tuples, branchMap, importJobId);

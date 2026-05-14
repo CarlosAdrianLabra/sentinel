@@ -133,6 +133,7 @@ model ImportJob {
   errorMessage  String?
   startedAt     DateTime?
   finishedAt    DateTime?
+  snapshotDate  DateTime? /// timestamp del header "Impresion:" del archivo legacy
   createdAt     DateTime  @default(now())
 
   @@index([status])

@@ -231,7 +231,21 @@ async function persistTuples(
         },
       });
 
-      // 2. Upsert InventoryPosition por (branchId, productId, size)
+      // 2. Leer InventoryPosition existente (si existe) para calcular delta
+      const existingPosition = await tx.inventoryPosition.findUnique({
+        where: {
+          branchId_productId_size: {
+            branchId: branchId,
+            productId: product.id,
+            size: tuple.size,
+          },
+        },
+      });
+
+      const previousQuantity = existingPosition?.quantity ?? 0;
+      const delta = tuple.quantity - previousQuantity;
+
+      // 3. Upsert InventoryPosition con la nueva quantity
       await tx.inventoryPosition.upsert({
         where: {
           branchId_productId_size: {
@@ -249,17 +263,19 @@ async function persistTuples(
         },
       });
 
-      // 3. Crear InventoryMovement
-      await tx.inventoryMovement.create({
-        data: {
-          branchId: branchId,
-          productId: product.id,
-          size: tuple.size,
-          movementType: "IMPORT_SET",
-          quantityDelta: tuple.quantity,
-          referenceId: String(importJobId),
-        },
-      });
+      // 4. Crear InventoryMovement solo si hay cambio
+      if (delta !== 0) {
+        await tx.inventoryMovement.create({
+          data: {
+            branchId: branchId,
+            productId: product.id,
+            size: tuple.size,
+            movementType: "IMPORT_SET",
+            quantityDelta: delta,
+            referenceId: String(importJobId),
+          },
+        });
+      }
 
       processedCount++;
     }

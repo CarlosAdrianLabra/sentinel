@@ -253,6 +253,17 @@ MARCA-MODELO-GENERO-MATERIAL-COLOR
     se muestran como `<N empty items>` en Node), `""` (string vacío),
     `null` (raramente). Los tres casos deben normalizarse con un helper
     `isEmpty(cell)`.
+  - **Importante: ceros vs vacíos en filas de datos.** El legacy
+    distingue entre las dos cosas según la fila:
+    - Filas de **SUC.** (datos por sucursal): celda **vacía** cuando
+      no hay stock para esa talla. Nunca emite 0 explícito.
+    - Filas de **TOT.** (totales de bloque): emite **0 explícito**
+      cuando el total es cero.
+    Verificado visualmente en CHARLYEXISTENCIA.xlsx (2026-05-15).
+    Implicación: un filtro tipo `cantidad > 0` aplicado solo a filas
+    de SUC es indistinguible de un filtro `typeof === "number"`,
+    porque en esas filas nunca hay 0. El parser actual aprovecha esto
+    (ver sección 10).
 - Header "Sucursal: TODAS" aparece en archivos multi-sucursal.
   El parser NO debe depender del header para obtener la sucursal —
   siempre debe leer la sucursal de la columna 1 de cada fila de datos.
@@ -284,8 +295,14 @@ Alcance del MVP:
 - Script standalone: `pnpm tsx scripts/import-existencias.ts <archivo.xlsx>`.
 - Maneja formato observado en CHARLYEXISTENCIA.xlsx (un archivo = una sucursal).
 - Importa todos los productos (activos e inactivos, `isActive` derivado del `*`).
-- Crea `InventoryPosition` con `quantity` incluso cuando es 0
-  (decisión: mantener posiciones esparsas para simplificar updates futuros).
+- Crea `InventoryPosition` solo para combos (branch, producto, talla)
+  con `quantity > 0` en el snapshot. La decisión original era guardar
+  también las de 0, pero en la práctica el legacy nunca emite 0 en filas
+  de SUC (siempre celda vacía — ver sección 8), así que el filtro `> 0`
+  en el parser y "ignorar celdas no numéricas" son indistinguibles para
+  los archivos que tenemos. Limitación conocida: si un import posterior
+  no menciona una posición que sí existe en DB, esa posición no se
+  actualiza — ver edge case más abajo.
 - Ignora costo por ahora (fuera del MVP, queda como ejercicio futuro).
 - Captura la fecha del snapshot del header del archivo.
 - Persiste en `ImportJob` + `InventoryMovement` de tipo `IMPORT_SET`.
@@ -334,6 +351,18 @@ rptNewInvetarioGlobalSinVenta.xlsx (single-branch, 25,052 productos,
 113K filas). En Converse: suma de quantity en tuplas = 514, igual al
 total reportado por el legacy.
 
+**CHARLY con persistencia (2026-05-15):** corrido end-to-end con
+escritura a DB. Resultados:
+
+- Productos detectados: 2,246 (todos los del archivo, activos e inactivos).
+- Filas de datos detectadas: 2,811 (más que productos porque hay
+  productos multi-rango que generan varios bloques SUC.).
+- Tuplas persistidas: 550 (combos branch × producto × talla con stock).
+- Suma de pares: 898 — **cuadra exacto con "Cantidad: 898" del header
+  del archivo legacy**. Esta es la verificación clave: el parser está
+  sumando bien lo que ve.
+- ImportJob 11 marcado COMPLETED. Transacción atómica sin errores.
+
 **Dónde retomar:**
 
 Deudas técnicas completadas (Fase 8):
@@ -345,15 +374,14 @@ Deudas técnicas completadas (Fase 8):
 - ✅ #4 — Manejo de errores: catch con 3 ramas + markImportJobFailed.
 - ✅ #5 — Refactor: persistTuples extraida de main().
 
-**Pendiente inmediato:** probar persistencia a escala.
+**Pendiente inmediato:** probar persistencia con el archivo grande.
 
-- CHARLYEXISTENCIA.xlsx (2,246 productos, ~2,811 filas datos, single-branch single-rango)
-  está pendiente de correr con persistencia. El parser ya se probó con este
-  archivo (modo solo-lectura) y detectó 2,246 productos correctamente.
-- rptNewInvetarioGlobalSinVenta.xlsx (25,052 productos, 113K filas) tambien.
-- Esperar tardanza: Converse procesa 239 tuplas en segundos; CHARLY puede tardar
-  30 seg a 3 min; rptNew puede tardar más.
-- Redirigir output a archivo: `> charly.txt 2>&1` para no llenar terminal.
+- ✅ CHARLYEXISTENCIA.xlsx — corrido con persistencia el 2026-05-15, total
+  898/898 cuadra con el legacy.
+- rptNewInvetarioGlobalSinVenta.xlsx (25,052 productos, 113K filas) sigue
+  pendiente. Es ~11× más grande que CHARLY en productos. Esperar tardanza
+  proporcional. Redirigir output a archivo: `> rptnew.txt 2>&1` para no
+  llenar terminal.
 
 **Otras direcciones para futuras sesiones:**
 
@@ -362,9 +390,33 @@ Deudas técnicas completadas (Fase 8):
 - Otros tipos de import (ventas, compras): requieren diseño formal antes de
   empezar. Ventas seria movements OUT, compras IN. Pensar como reconciliar
   el snapshot de existencias con los movimientos individuales.
-- Edge case no resuelto: si el archivo importado NO menciona una posicion que
-  SI existe en la DB, hoy se deja tal cual. Quizas convendria marcarla como
-  "no presente en este snapshot" (delta = -quantity para llevarla a 0).
+- **Edge case no resuelto (refinado 2026-05-15):** si un snapshot
+  posterior NO menciona una posición que SÍ existe en DB con stock,
+  la posición queda intacta — el parser no genera tupla para ella y
+  `persistTuples` nunca la toca. Esto NO se manifiesta dentro de un
+  solo import (no hay datos previos contra los que comparar), pero
+  SÍ se manifiesta entre imports consecutivos. Concretamente:
+  - Día 1: import dice (branch=1, producto X, talla 27.0) = 5 pares.
+    DB queda en 5.
+  - Día 2: se vendieron los 5. El legacy ya no imprime esa fila
+    (celda vacía, no 0). El parser no genera tupla para esa posición.
+    `persistTuples` no la toca. DB sigue diciendo 5. **Snapshot mintió.**
+
+  Por qué pasa: el filtro `> 0` en `parseProducts` y la decisión del
+  legacy de emitir vacío (no 0) en filas SUC se combinan para que
+  "no aparece en el archivo" sea indistinguible de "no está en el
+  rango de tallas del producto".
+
+  Estrategia para resolver (diferida): cuando se procese un snapshot,
+  hacer un diff contra el estado actual de la DB para el conjunto de
+  (branches, productos) que aparecen en el archivo, y generar tuplas
+  con quantity=0 para las posiciones que existían y ya no aparecen.
+  Decisión de diseño pendiente: ¿alcance del diff? ¿solo dentro de
+  productos mencionados, o también productos que aparecían antes y
+  ya no aparecen en absoluto?
+
+  Para el MVP (primer import a DB vacía) este bug no se manifiesta —
+  no hay posiciones previas contra las que sobrescribir.
 
 ## 11. Decisiones pendientes / preguntas abiertas
 

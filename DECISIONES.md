@@ -336,29 +336,35 @@ total reportado por el legacy.
 
 **Dónde retomar:**
 
-Deudas técnicas completadas hoy:
+Deudas técnicas completadas (Fase 8):
 
-- ✅ #3 — snapshotDate persistido en ImportJob (DateTime?, parseado con date-fns)
-- ✅ #4 — Manejo de errores: catch con 3 ramas + markImportJobFailed
-- ✅ #5 — Refactor: persistTuples extraída de main()
+- ✅ #1 — ImportJob huérfano id=1 eliminado (script puntual scripts/cleanup-orphan-importjobs.ts).
+- ✅ #2 — quantityDelta como diferencia (previousQuantity vía findUnique;
+  movement omitido si delta=0). Verificado: re-correr Converse identico = 0 movements nuevos.
+- ✅ #3 — snapshotDate persistido (DateTime?, parseado con date-fns).
+- ✅ #4 — Manejo de errores: catch con 3 ramas + markImportJobFailed.
+- ✅ #5 — Refactor: persistTuples extraida de main().
 
-Pendientes:
+**Pendiente inmediato:** probar persistencia a escala.
 
-- #1 — Limpiar ImportJob huérfano id=1 (status RUNNING crónico de pruebas).
-  Una sola query: `prisma.importJob.delete({ where: { id: 1 } })`.
-- #2 — quantityDelta debería ser diferencia respecto al stock previo, no
-  valor absoluto. Conceptualmente más complejo: requiere leer
-  InventoryPosition.quantity actual antes del upsert, calcular delta,
-  guardarlo en el movement, y entonces escribir el nuevo absoluto.
+- CHARLYEXISTENCIA.xlsx (2,246 productos, ~2,811 filas datos, single-branch single-rango)
+  está pendiente de correr con persistencia. El parser ya se probó con este
+  archivo (modo solo-lectura) y detectó 2,246 productos correctamente.
+- rptNewInvetarioGlobalSinVenta.xlsx (25,052 productos, 113K filas) tambien.
+- Esperar tardanza: Converse procesa 239 tuplas en segundos; CHARLY puede tardar
+  30 seg a 3 min; rptNew puede tardar más.
+- Redirigir output a archivo: `> charly.txt 2>&1` para no llenar terminal.
 
-Otras direcciones posibles para próxima sesión:
+**Otras direcciones para futuras sesiones:**
 
-- Probar a escala con CHARLYEXISTENCIA.xlsx (2,246 productos) y
-  rptNewInvetarioGlobalSinVenta.xlsx (25,052 productos) para confirmar
-  que la persistencia escala.
-- Empezar UI: página `/imports` que liste los ImportJobs (status, fechas,
-  contadores), instalar shadcn/ui.
-- Otros tipos de import (ventas, compras) requieren diseño formal antes.
+- UI `/imports`: pagina que liste ImportJobs (status, fechas, contadores).
+  Instalar shadcn/ui antes.
+- Otros tipos de import (ventas, compras): requieren diseño formal antes de
+  empezar. Ventas seria movements OUT, compras IN. Pensar como reconciliar
+  el snapshot de existencias con los movimientos individuales.
+- Edge case no resuelto: si el archivo importado NO menciona una posicion que
+  SI existe en la DB, hoy se deja tal cual. Quizas convendria marcarla como
+  "no presente en este snapshot" (delta = -quantity para llevarla a 0).
 
 ## 11. Decisiones pendientes / preguntas abiertas
 

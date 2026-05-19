@@ -340,6 +340,12 @@ isActive, size, quantity }`.
   `validateTuples(unknown[])` corre antes de persistir; si Zod tira
   `ZodError`, el catch lo distingue con `instanceof` y muestra mensajes
   legibles (`tupla N.campo: mensaje`).
+- **Verificador de TOT (agregado 2026-05-15):** durante el parseo, el
+  script suma las cantidades que extrae por bloque SUC. y las compara
+  con la fila `TOT.` del mismo bloque. Si difieren, emite un warning
+  `*** MISMATCH "<producto>": parser=N, archivo=M`. No frena el import
+  — es una guardia diagnóstica para detectar futuros cambios de formato
+  del legacy o bugs en el parser. Se decidió dejarlo permanente.
 
 Refactor: el script está dividido en funciones puras
 (`getFilePathFromArgs`, `readWorkbook`, `selectDataSheet`,
@@ -363,6 +369,58 @@ escritura a DB. Resultados:
   sumando bien lo que ve.
 - ImportJob 11 marcado COMPLETED. Transacción atómica sin errores.
 
+**rptNew con persistencia (2026-05-15):** corrido end-to-end con el
+archivo más grande del set (25,052 productos, 113K filas). Resultados
+finales después de descubrir y arreglar 3 problemas:
+
+- Productos detectados: 25,052.
+- Filas de datos detectadas: 29,565.
+- Tuplas persistidas: 8,201+ (combos branch × producto × talla con stock).
+- Suma de pares: 15,166.
+- "Cantidad" del header legacy: 15,997.
+- Diferencia 831 pares: corresponden a productos no-zapato (cremas,
+  cabestrillos, andaderas, etc.) deliberadamente fuera del MVP — ver
+  sección 11. Para productos zapato el parser cuadra exacto.
+- Tiempo total del script: ~14s (incluye parseo + persistencia). No
+  pega contra el timeout de 5s de transacciones interactivas de Prisma
+  porque el grueso del tiempo se va en el parseo del .xlsx, no en la
+  transacción.
+- ImportJob 12 marcado COMPLETED.
+
+**Problemas descubiertos y resueltos durante esta verificación
+(2026-05-15):**
+
+1. **Falsos mismatches por `productSum` mal reseteado.** El verificador
+   de TOT (recién agregado) inicializaba `productSum = 0` una vez por
+   producto, no por bloque SUC. En productos multi-rango (bloques SUC.
+   múltiples), `productSum` acumulaba entre bloques y comparaba mal
+   contra el TOT del bloque actual. Generaba ~190 falsos mismatches.
+   Arreglo: mover `productSum = 0` adentro del `if (blockCell === "SUC.")`,
+   junto al reset de `sizeByColumn`. **Bug del verificador, no del parser
+   real** — las tuplas persistidas eran correctas.
+
+2. **Bug real: tallas BEBE perdidas.** El filtro de columnas de tallas
+   era `num < 1000 || num > 4000`. Esto cortaba tallas `0900` (9.0)
+   y otras menores a 10.0, que aparecen en productos BEBE y niños
+   chicos. 17 productos afectados, ~30 pares perdidos silenciosamente.
+   Arreglo: bajar el límite inferior a `< 500`. El rango `500-4000`
+   cubre desde 5.0 (bebé recién nacido) hasta 40.0 (adulto grande).
+   El límite superior sigue siendo defensa contra basura de captura
+   tipo `9500` (typo del legacy confirmado por el operador).
+
+3. **Limitación de scope: productos no-zapato.** 209 productos del
+   archivo usan headers de talla categóricos (`PZA`, `XCHI|CHIC|MEDI|GRAN|EXTR`,
+   `CH00|MD00|GR00|XG00|JM00`) en vez de tallas numéricas. Marcas:
+   ARFAT (cremas, esponjas, plantillas), DAONSA (cabestrillos,
+   andaderas, férulas), SUPER CONFORT (sillas de ruedas, bastones),
+   MEDI PAR (férulas), LE ROY (collarines), etc. El parser los ignora
+   completamente porque sus "tallas" no son numéricas. **Decisión:
+   diferido** — el operador (tío de Carlos) confirma que SÍ quiere
+   estos productos en Sentinel "preferiblemente", pero NO son
+   prioritarios. Requieren rediseño del schema (¿`size` como string
+   libre? ¿enum por familia de producto? ¿campo `productCategory`?).
+   Ver sección 11.
+
 **Dónde retomar:**
 
 Deudas técnicas completadas (Fase 8):
@@ -374,19 +432,24 @@ Deudas técnicas completadas (Fase 8):
 - ✅ #4 — Manejo de errores: catch con 3 ramas + markImportJobFailed.
 - ✅ #5 — Refactor: persistTuples extraida de main().
 
-**Pendiente inmediato:** probar persistencia con el archivo grande.
+**Pendiente inmediato:** ninguno. Fase 8 cerrada.
 
-- ✅ CHARLYEXISTENCIA.xlsx — corrido con persistencia el 2026-05-15, total
-  898/898 cuadra con el legacy.
-- rptNewInvetarioGlobalSinVenta.xlsx (25,052 productos, 113K filas) sigue
-  pendiente. Es ~11× más grande que CHARLY en productos. Esperar tardanza
-  proporcional. Redirigir output a archivo: `> rptnew.txt 2>&1` para no
-  llenar terminal.
+- ✅ CHARLYEXISTENCIA.xlsx — corrido con persistencia el 2026-05-15,
+  total 898/898 cuadra con el legacy.
+- ✅ rptNewInvetarioGlobalSinVenta.xlsx — corrido con persistencia el
+  2026-05-15, total 15,166/15,166 para productos zapato (831 pares de
+  productos no-zapato fuera de scope, documentados).
+
+**Próxima fase propuesta — Fase 9: UI `/imports`.**
+
+Página que liste ImportJobs (status, fechas, contadores). Requiere
+instalar shadcn/ui antes. Extiende la UI de branches (Fase 7) y da
+visibilidad de los imports al operador. Antes de empezar, refactorizar
+los `process.exit(1)` del parser a `throw new Error(...)` para que sea
+seguro invocarlo desde un Server Action (ver sección 11).
 
 **Otras direcciones para futuras sesiones:**
 
-- UI `/imports`: pagina que liste ImportJobs (status, fechas, contadores).
-  Instalar shadcn/ui antes.
 - Otros tipos de import (ventas, compras): requieren diseño formal antes de
   empezar. Ventas seria movements OUT, compras IN. Pensar como reconciliar
   el snapshot de existencias con los movimientos individuales.
@@ -424,6 +487,41 @@ Deudas técnicas completadas (Fase 8):
 - Si Prisma 7 tendrá un comportamiento distinto en algún aspecto: verificar contra la documentación siempre que parezca contradictorio con Prisma 6.
 
 - **Manejo de errores en el parser de imports.** Las funciones del script (`getFilePathFromArgs`, `selectDataSheet`, etc.) terminan el proceso con `process.exit(1)` cuando algo falla. Esto está bien para un script CLI standalone, pero **rompería un servidor** si lo invocáramos desde un Server Action o Route Handler de Next: mataría el proceso entero, tirando todos los usuarios conectados. Cuando integremos el parser a una UI, refactorizar a `throw new Error(...)` y manejar los errores en la capa de orquestación (la API/Action), no en las funciones internas.
+
+- **Productos no-zapato con tallas categóricas (descubierto 2026-05-15).**
+  El legacy contiene ~209 productos no-zapato — cremas, esponjas,
+  cabestrillos, andaderas, sillas de ruedas, plantillas, férulas,
+  collarines — de marcas tipo ARFAT, DAONSA, SUPER CONFORT, MEDI PAR,
+  LE ROY. Estos productos usan headers de talla categóricos (no numéricos):
+  `PZA` para pieza única, `XCHI|CHIC|MEDI|GRAN|EXTR` para ortopedia,
+  `CH00|MD00|GR00|XG00|JM00` para vendas/calcetas, etc. El parser
+  actual los detecta (genera la fila "Producto N: ...") pero ignora
+  todas sus celdas de cantidad porque sus headers no caen en el rango
+  numérico `500-4000`.
+
+  Decisión actual: **diferido**. El operador confirma que SÍ los quiere
+  en Sentinel "preferiblemente", pero no son prioridad para el MVP
+  (los zapatos son la sección principal de la tienda, después ropa,
+  después accesorios/ortopedia).
+
+  Cuando se aborde (probablemente Fase N futura), requiere decisiones
+  de diseño no triviales:
+  - ¿`size` cambia de string numérico (`"17.0"`) a string libre que
+    acepta categorías (`"CHIC"`, `"PZA"`)? ¿O se agrega un campo
+    aparte tipo `sizeCategory`?
+  - ¿Product gana un campo `productCategory` (zapato | ortopedia |
+    accesorio | limpieza)? ¿O se infiere del header de tallas que
+    usa el producto?
+  - ¿Cómo se valida el campo `size` con Zod? Hoy el regex es `/^\d+\.\d$/`.
+    Si se acepta texto libre, hay que pensar enums o sets de valores
+    permitidos por categoría.
+  - Investigar antes de codear: ¿cuántos tipos distintos de header
+    categórico aparecen en los archivos del legacy? Hoy vimos 3-4
+    pero el catálogo completo puede ser más grande.
+
+  Mientras tanto, el verificador de TOT (ver sección 10) sigue
+  reportando estos productos como `parser=0, archivo=N` warnings,
+  lo cual sirve de recordatorio visible en cada import.
 
 ---
 

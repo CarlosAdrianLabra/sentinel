@@ -89,6 +89,7 @@ function parseProducts(rows: unknown[][]): InventoryTuple[] {
 
     let j = i + 1;
     let sizeByColumn: Record<number, string> = {};
+    let productSum = 0;
 
     while (j < rows.length) {
       const blockRow = rows[j];
@@ -102,6 +103,7 @@ function parseProducts(rows: unknown[][]): InventoryTuple[] {
 
       if (blockCell === "SUC.") {
         sizeByColumn = {};
+        productSum = 0;
 
         for (let col = 4; col < 27; col++) {
           const headerCell = blockRow[col];
@@ -113,7 +115,7 @@ function parseProducts(rows: unknown[][]): InventoryTuple[] {
 
           const num = Number(trimmed);
           if (isNaN(num)) continue;
-          if (num < 1000 || num > 4000) continue;
+          if (num < 500 || num > 4000) continue;
 
           const tallaReal = num / 100;
           sizeByColumn[col] = tallaReal.toFixed(1);
@@ -147,7 +149,21 @@ function parseProducts(rows: unknown[][]): InventoryTuple[] {
               size: talla,
               quantity: cantidadCell,
             });
+            productSum += cantidadCell;
           }
+        }
+      }
+      // Detección de fila TOT para verificar suma del producto
+      const isTotRow = blockRow.some(
+        (c) => typeof c === "string" && c.trim() === "TOT.",
+      );
+      if (isTotRow) {
+        // Buscar el número en la fila — el total declarado por el archivo
+        const totDeclared = blockRow.find((c) => typeof c === "number");
+        if (typeof totDeclared === "number" && totDeclared !== productSum) {
+          console.log(
+            `*** MISMATCH "${productName}": parser=${productSum}, archivo=${totDeclared}`,
+          );
         }
       }
 
@@ -288,6 +304,7 @@ async function main(): Promise<void> {
   const filePath = getFilePathFromArgs();
   let importJobId: number | undefined;
   try {
+    console.time("total");
     console.log("Archivo recibido:", filePath);
     const workbook = readWorkbook(filePath);
     console.log("Hojas encontradas:", workbook.SheetNames);
@@ -364,5 +381,6 @@ main()
     process.exit(1);
   })
   .finally(async () => {
+    console.timeEnd("total");
     await prisma.$disconnect();
   });

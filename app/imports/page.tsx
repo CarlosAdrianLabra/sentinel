@@ -8,6 +8,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 const FRESHNESS_STYLES: Record<
   "AL_DIA" | "PENDIENTE" | "DESACTUALIZADO" | "FALLO" | "SIN_DATOS",
   { label: string; cardClass: string }
@@ -32,6 +33,13 @@ const FRESHNESS_STYLES: Record<
     label: "Sin datos importados",
     cardClass: "border-gray-400 bg-gray-50 dark:bg-gray-900",
   },
+};
+const STATUS_STYLES: Record<string, string> = {
+  COMPLETED:
+    "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+  FAILED: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
+  RUNNING: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
+  PENDING: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100",
 };
 export default async function ImportsPage() {
   const { freshness, history } = await getImportsPageData();
@@ -73,7 +81,11 @@ export default async function ImportsPage() {
             <TableRow key={job.id}>
               <TableCell>{job.snapshotDate?.toLocaleString()}</TableCell>
               <TableCell>{job.createdAt?.toLocaleString()}</TableCell>
-              <TableCell>{job.status}</TableCell>
+              <TableCell>
+                <Badge className={STATUS_STYLES[job.status] ?? ""}>
+                  {job.status}
+                </Badge>
+              </TableCell>
               <TableCell>{job.fileName}</TableCell>
               <TableCell>{job.processedRows}</TableCell>
             </TableRow>

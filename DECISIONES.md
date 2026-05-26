@@ -259,11 +259,11 @@ MARCA-MODELO-GENERO-MATERIAL-COLOR
       no hay stock para esa talla. Nunca emite 0 explícito.
     - Filas de **TOT.** (totales de bloque): emite **0 explícito**
       cuando el total es cero.
-    Verificado visualmente en CHARLYEXISTENCIA.xlsx (2026-05-15).
-    Implicación: un filtro tipo `cantidad > 0` aplicado solo a filas
-    de SUC es indistinguible de un filtro `typeof === "number"`,
-    porque en esas filas nunca hay 0. El parser actual aprovecha esto
-    (ver sección 10).
+      Verificado visualmente en CHARLYEXISTENCIA.xlsx (2026-05-15).
+      Implicación: un filtro tipo `cantidad > 0` aplicado solo a filas
+      de SUC es indistinguible de un filtro `typeof === "number"`,
+      porque en esas filas nunca hay 0. El parser actual aprovecha esto
+      (ver sección 10).
 - Header "Sucursal: TODAS" aparece en archivos multi-sucursal.
   El parser NO debe depender del header para obtener la sucursal —
   siempre debe leer la sucursal de la columna 1 de cada fila de datos.
@@ -285,201 +285,93 @@ MARCA-MODELO-GENERO-MATERIAL-COLOR
 - **Fase 5** — Seed de sucursales funcional e idempotente. Reto extra: script reset.ts escrito por Carlos.
 - **Fase 6** — Servicio `lib/services/branches.ts` + endpoint `GET /api/branches` funcionando. Separación servicio/handler validada. Respuesta envuelta en `{ branches: [...] }`. Manejo de errores con try/catch en el handler, log autodescriptivo, status 500 con mensaje sanitizado. Verificado en navegador en localhost:3000/api/branches.
 - **Fase 7** — Primera UI: `app/branches/page.tsx` como Server Component que llama `listBranches()` directo (sin pasar por fetch a la API). Decisión arquitectónica: Server Components consumen servicios internos; la API route queda para consumidores externos (app móvil futura, integraciones, terceros). Error handling delegado a Next.js (sin try/catch en la página; `error.tsx` pendiente). Estilado con Tailwind puro: jerarquía de texto (h1/h2/p con `text-3xl`, `text-xl`, `text-sm`), tarjetas con `border rounded-lg p-4`, separación entre tarjetas con `space-y-4`, padding de página con `p-8`. Preflight de Tailwind entendido: resetea defaults del navegador, hay que estilizar explícitamente. Dark mode automático vía `prefers-color-scheme` del layout raíz — `text-gray-400` elegido para legibilidad en modo oscuro (solución temporal hasta sistema de temas explícito).
+- **Fase 8** — Parser de existencias desde Excel legacy. Cerrada el
+  2026-05-15. CHARLY (898/898), rptNew (15166/15166 para productos
+  zapato). Verificador de TOT permanente, ImportJob persistido con
+  snapshotDate, manejo de errores con markImportJobFailed.
+
+- **Fase 9** — UI `/imports`. Página Server Component que llama a
+  `getImportsPageData()` (en `lib/services/imports.ts`). Muestra:
+  card de freshness arriba (semáforo con 5 niveles: AL_DIA, PENDIENTE,
+  DESACTUALIZADO, FALLO, SIN_DATOS) + tabla shadcn abajo con historial
+  completo. Lógica del semáforo en función pura `calculateFreshnessLevel`
+  con parámetro `now` inyectado (testeable). shadcn/ui instalado con
+  preset Nova + Radix; componentes en uso: Card, Table, Badge. Mapas
+  declarativos `FRESHNESS_STYLES` y `STATUS_STYLES` con tipos `Record<>`
+  para forzar exhaustividad en niveles conocidos. Estilo mínimo a
+  propósito — polish diferido a fase futura.
 
 ## 10. Fase actual
 
-**Fase 8 — Parser de existencias desde Excel legacy.**
+**Fase 9 cerrada (2026-05-20)** — UI `/imports`. Resumen detallado
+en sección 9. La página muestra el card de freshness arriba con
+semáforo de 5 niveles y la tabla de historial abajo con badges de
+status. Verificado en navegador con DB real (12 ImportJobs).
+Stack agregado: shadcn/ui (preset Nova + Radix), componentes Card,
+Table, Badge. Mapas declarativos `FRESHNESS_STYLES` y `STATUS_STYLES`
+para mapear estados → label/color. Lógica del semáforo en función pura
+`calculateFreshnessLevel(lastSuccessful, lastAttempt, now)` — testeable
+porque `now` se inyecta como parámetro.
 
-Alcance del MVP:
+**Fase 10 — pendiente de definición.**
 
-- Script standalone: `pnpm tsx scripts/import-existencias.ts <archivo.xlsx>`.
-- Maneja formato observado en CHARLYEXISTENCIA.xlsx (un archivo = una sucursal).
-- Importa todos los productos (activos e inactivos, `isActive` derivado del `*`).
-- Crea `InventoryPosition` solo para combos (branch, producto, talla)
-  con `quantity > 0` en el snapshot. La decisión original era guardar
-  también las de 0, pero en la práctica el legacy nunca emite 0 en filas
-  de SUC (siempre celda vacía — ver sección 8), así que el filtro `> 0`
-  en el parser y "ignorar celdas no numéricas" son indistinguibles para
-  los archivos que tenemos. Limitación conocida: si un import posterior
-  no menciona una posición que sí existe en DB, esa posición no se
-  actualiza — ver edge case más abajo.
-- Ignora costo por ahora (fuera del MVP, queda como ejercicio futuro).
-- Captura la fecha del snapshot del header del archivo.
-- Persiste en `ImportJob` + `InventoryMovement` de tipo `IMPORT_SET`.
-- Validación con Zod en cada frontera.
+Candidatas para la próxima fase, en orden tentativo de prioridad:
 
-Fuera del alcance:
+- **UI de inventario.** Páginas para ver/buscar InventoryPosition.
+  Probablemente filtros por sucursal, marca, modelo. Es lo más
+  cercano al valor inmediato para el operador (saber qué hay en
+  qué sucursal). Requiere paginación o virtual scroll (8,000+ filas
+  en DB hoy, va a crecer).
 
-- UI de import (Fase 9+).
-- Archivos multi-sucursal (cuando tengamos uno para inspeccionar).
-- Archivos de ECOMM/branch 5 (semántica distinta, ver Sección 7).
-- Otros tipos de archivos (ventas, compras): fases posteriores.
+- **Importer de ventas.** Movements OUT desde archivos VENTACHARLY
+  o MARZOVENTAS. Requiere diseño formal: ¿cómo se reconcilia un
+  snapshot de existencias con movimientos individuales de venta?
 
-**Progreso de Fase 8 — parser de existencias:**
+- **Importer de compras.** Movements IN desde COMPRASMARZO. Similar
+  al anterior, simétrico (IN en vez de OUT).
 
-Hito alcanzado: el parser convierte un archivo xlsx del legacy en un
-array tipado `InventoryTuple[]` en memoria, listo para validar y
-persistir.
+- **Refactor `process.exit(1)` → `throw` del parser** (deuda registrada
+  en sección 11). Necesario antes de exponer el parser desde una
+  Server Action o Route Handler — actualmente mataría el servidor
+  Next si fallara.
 
-Implementado:
+- **Resolver edge case "snapshot mintió"** (registrado más abajo en
+  esta sección). Requiere implementar diff contra DB al persistir.
 
-- Validación de argumento CLI (`process.argv[2]`).
-- Lectura del workbook con `xlsx` (SheetJS).
-- Selección de hoja por convención `rpt*`.
-- Extracción del timestamp del header.
-- Detección de productos por patrón (>=4 guiones en col 1).
-- Soporte de productos multi-rango-tallas (varios bloques `SUC.`).
-- Soporte de archivos multi-branch (varias filas de datos por bloque).
-- Mapeo dinámico columna → talla (normalizada como string "17.0").
-- Detección y limpieza de productos inactivos (terminan con `*`).
-- Construcción de tuplas tipadas: `{ branchLegacyId, fullDescription,
-isActive, size, quantity }`.
-- Validación con Zod: `InventoryTupleSchema` define el contrato runtime
-  (entero positivo, regex de talla "N.N", etc.). El type `InventoryTuple`
-  se infiere del schema con `z.infer` — fuente única de verdad. Función
-  `validateTuples(unknown[])` corre antes de persistir; si Zod tira
-  `ZodError`, el catch lo distingue con `instanceof` y muestra mensajes
-  legibles (`tupla N.campo: mensaje`).
-- **Verificador de TOT (agregado 2026-05-15):** durante el parseo, el
-  script suma las cantidades que extrae por bloque SUC. y las compara
-  con la fila `TOT.` del mismo bloque. Si difieren, emite un warning
-  `*** MISMATCH "<producto>": parser=N, archivo=M`. No frena el import
-  — es una guardia diagnóstica para detectar futuros cambios de formato
-  del legacy o bugs en el parser. Se decidió dejarlo permanente.
+Decisión específica diferida a inicio de sesión próxima.
 
-Refactor: el script está dividido en funciones puras
-(`getFilePathFromArgs`, `readWorkbook`, `selectDataSheet`,
-`extractSnapshotDate`, `parseProducts`) orquestadas por `main()`.
+---
 
-Verificación: probado con Converse.xlsx (multi-branch, multi-rango),
-CHARLYEXISTENCIA.xlsx (single-branch, 2,246 productos),
-rptNewInvetarioGlobalSinVenta.xlsx (single-branch, 25,052 productos,
-113K filas). En Converse: suma de quantity en tuplas = 514, igual al
-total reportado por el legacy.
+**Histórico — edge case heredado de Fase 8 (no resuelto):**
 
-**CHARLY con persistencia (2026-05-15):** corrido end-to-end con
-escritura a DB. Resultados:
+Si un snapshot posterior NO menciona una posición que SÍ existe en DB
+con stock, la posición queda intacta — el parser no genera tupla para
+ella y `persistTuples` nunca la toca. NO se manifiesta dentro de un
+solo import (no hay datos previos contra los que comparar), pero SÍ
+entre imports consecutivos:
 
-- Productos detectados: 2,246 (todos los del archivo, activos e inactivos).
-- Filas de datos detectadas: 2,811 (más que productos porque hay
-  productos multi-rango que generan varios bloques SUC.).
-- Tuplas persistidas: 550 (combos branch × producto × talla con stock).
-- Suma de pares: 898 — **cuadra exacto con "Cantidad: 898" del header
-  del archivo legacy**. Esta es la verificación clave: el parser está
-  sumando bien lo que ve.
-- ImportJob 11 marcado COMPLETED. Transacción atómica sin errores.
+- Día 1: import dice (branch=1, producto X, talla 27.0) = 5 pares.
+  DB queda en 5.
+- Día 2: se vendieron los 5. El legacy ya no imprime esa fila
+  (celda vacía, no 0). El parser no genera tupla para esa posición.
+  `persistTuples` no la toca. DB sigue diciendo 5. **Snapshot mintió.**
 
-**rptNew con persistencia (2026-05-15):** corrido end-to-end con el
-archivo más grande del set (25,052 productos, 113K filas). Resultados
-finales después de descubrir y arreglar 3 problemas:
+Por qué pasa: el filtro `> 0` en `parseProducts` y la decisión del
+legacy de emitir vacío (no 0) en filas SUC se combinan para que
+"no aparece en el archivo" sea indistinguible de "no está en el
+rango de tallas del producto".
 
-- Productos detectados: 25,052.
-- Filas de datos detectadas: 29,565.
-- Tuplas persistidas: 8,201+ (combos branch × producto × talla con stock).
-- Suma de pares: 15,166.
-- "Cantidad" del header legacy: 15,997.
-- Diferencia 831 pares: corresponden a productos no-zapato (cremas,
-  cabestrillos, andaderas, etc.) deliberadamente fuera del MVP — ver
-  sección 11. Para productos zapato el parser cuadra exacto.
-- Tiempo total del script: ~14s (incluye parseo + persistencia). No
-  pega contra el timeout de 5s de transacciones interactivas de Prisma
-  porque el grueso del tiempo se va en el parseo del .xlsx, no en la
-  transacción.
-- ImportJob 12 marcado COMPLETED.
+Estrategia para resolver (diferida): al procesar un snapshot, hacer
+un diff contra el estado actual de la DB para el conjunto de
+(branches, productos) que aparecen en el archivo, y generar tuplas
+con quantity=0 para las posiciones que existían y ya no aparecen.
+Decisión de diseño pendiente: ¿alcance del diff? ¿solo dentro de
+productos mencionados, o también productos que aparecían antes y
+ya no aparecen en absoluto?
 
-**Problemas descubiertos y resueltos durante esta verificación
-(2026-05-15):**
-
-1. **Falsos mismatches por `productSum` mal reseteado.** El verificador
-   de TOT (recién agregado) inicializaba `productSum = 0` una vez por
-   producto, no por bloque SUC. En productos multi-rango (bloques SUC.
-   múltiples), `productSum` acumulaba entre bloques y comparaba mal
-   contra el TOT del bloque actual. Generaba ~190 falsos mismatches.
-   Arreglo: mover `productSum = 0` adentro del `if (blockCell === "SUC.")`,
-   junto al reset de `sizeByColumn`. **Bug del verificador, no del parser
-   real** — las tuplas persistidas eran correctas.
-
-2. **Bug real: tallas BEBE perdidas.** El filtro de columnas de tallas
-   era `num < 1000 || num > 4000`. Esto cortaba tallas `0900` (9.0)
-   y otras menores a 10.0, que aparecen en productos BEBE y niños
-   chicos. 17 productos afectados, ~30 pares perdidos silenciosamente.
-   Arreglo: bajar el límite inferior a `< 500`. El rango `500-4000`
-   cubre desde 5.0 (bebé recién nacido) hasta 40.0 (adulto grande).
-   El límite superior sigue siendo defensa contra basura de captura
-   tipo `9500` (typo del legacy confirmado por el operador).
-
-3. **Limitación de scope: productos no-zapato.** 209 productos del
-   archivo usan headers de talla categóricos (`PZA`, `XCHI|CHIC|MEDI|GRAN|EXTR`,
-   `CH00|MD00|GR00|XG00|JM00`) en vez de tallas numéricas. Marcas:
-   ARFAT (cremas, esponjas, plantillas), DAONSA (cabestrillos,
-   andaderas, férulas), SUPER CONFORT (sillas de ruedas, bastones),
-   MEDI PAR (férulas), LE ROY (collarines), etc. El parser los ignora
-   completamente porque sus "tallas" no son numéricas. **Decisión:
-   diferido** — el operador (tío de Carlos) confirma que SÍ quiere
-   estos productos en Sentinel "preferiblemente", pero NO son
-   prioritarios. Requieren rediseño del schema (¿`size` como string
-   libre? ¿enum por familia de producto? ¿campo `productCategory`?).
-   Ver sección 11.
-
-**Dónde retomar:**
-
-Deudas técnicas completadas (Fase 8):
-
-- ✅ #1 — ImportJob huérfano id=1 eliminado (script puntual scripts/cleanup-orphan-importjobs.ts).
-- ✅ #2 — quantityDelta como diferencia (previousQuantity vía findUnique;
-  movement omitido si delta=0). Verificado: re-correr Converse identico = 0 movements nuevos.
-- ✅ #3 — snapshotDate persistido (DateTime?, parseado con date-fns).
-- ✅ #4 — Manejo de errores: catch con 3 ramas + markImportJobFailed.
-- ✅ #5 — Refactor: persistTuples extraida de main().
-
-**Pendiente inmediato:** ninguno. Fase 8 cerrada.
-
-- ✅ CHARLYEXISTENCIA.xlsx — corrido con persistencia el 2026-05-15,
-  total 898/898 cuadra con el legacy.
-- ✅ rptNewInvetarioGlobalSinVenta.xlsx — corrido con persistencia el
-  2026-05-15, total 15,166/15,166 para productos zapato (831 pares de
-  productos no-zapato fuera de scope, documentados).
-
-**Próxima fase propuesta — Fase 9: UI `/imports`.**
-
-Página que liste ImportJobs (status, fechas, contadores). Requiere
-instalar shadcn/ui antes. Extiende la UI de branches (Fase 7) y da
-visibilidad de los imports al operador. Antes de empezar, refactorizar
-los `process.exit(1)` del parser a `throw new Error(...)` para que sea
-seguro invocarlo desde un Server Action (ver sección 11).
-
-**Otras direcciones para futuras sesiones:**
-
-- Otros tipos de import (ventas, compras): requieren diseño formal antes de
-  empezar. Ventas seria movements OUT, compras IN. Pensar como reconciliar
-  el snapshot de existencias con los movimientos individuales.
-- **Edge case no resuelto (refinado 2026-05-15):** si un snapshot
-  posterior NO menciona una posición que SÍ existe en DB con stock,
-  la posición queda intacta — el parser no genera tupla para ella y
-  `persistTuples` nunca la toca. Esto NO se manifiesta dentro de un
-  solo import (no hay datos previos contra los que comparar), pero
-  SÍ se manifiesta entre imports consecutivos. Concretamente:
-  - Día 1: import dice (branch=1, producto X, talla 27.0) = 5 pares.
-    DB queda en 5.
-  - Día 2: se vendieron los 5. El legacy ya no imprime esa fila
-    (celda vacía, no 0). El parser no genera tupla para esa posición.
-    `persistTuples` no la toca. DB sigue diciendo 5. **Snapshot mintió.**
-
-  Por qué pasa: el filtro `> 0` en `parseProducts` y la decisión del
-  legacy de emitir vacío (no 0) en filas SUC se combinan para que
-  "no aparece en el archivo" sea indistinguible de "no está en el
-  rango de tallas del producto".
-
-  Estrategia para resolver (diferida): cuando se procese un snapshot,
-  hacer un diff contra el estado actual de la DB para el conjunto de
-  (branches, productos) que aparecen en el archivo, y generar tuplas
-  con quantity=0 para las posiciones que existían y ya no aparecen.
-  Decisión de diseño pendiente: ¿alcance del diff? ¿solo dentro de
-  productos mencionados, o también productos que aparecían antes y
-  ya no aparecen en absoluto?
-
-  Para el MVP (primer import a DB vacía) este bug no se manifiesta —
-  no hay posiciones previas contra las que sobrescribir.
+Para el MVP de Fase 8 (primer import a DB vacía) este bug no se
+manifestó. Se va a manifestar el día que tu tío empiece a importar
+diario con datos previos en DB.
 
 ## 11. Decisiones pendientes / preguntas abiertas
 
@@ -522,6 +414,34 @@ seguro invocarlo desde un Server Action (ver sección 11).
   Mientras tanto, el verificador de TOT (ver sección 10) sigue
   reportando estos productos como `parser=0, archivo=N` warnings,
   lo cual sirve de recordatorio visible en cada import.
+
+- **Validador "archivo no regresivo" en parser de imports.** Al
+  importar un .xlsx, comparar su `snapshotDate` con el del último
+  ImportJob COMPLETED. Si el archivo nuevo es más viejo, rechazar
+  con error claro. Defiende contra subir por error un archivo
+  obsoleto de una carpeta de backups o un export antiguo. Pendiente
+  hasta tener UI de import (Fase 9+).
+
+- **Convención operativa: siempre archivo global multi-sucursal.**
+  Para evitar sucursales desfasadas en Sentinel, el operador debe
+  exportar siempre el reporte multi-sucursal del legacy, no archivos
+  filtrados por sucursal individual. PENDIENTE DE VERIFICAR con el
+  operador del legacy cuál es exactamente ese reporte: hoy el único
+  archivo multi-branch probado en Fase 8 es Converse.xlsx. Los
+  archivos `rptNewInvetario*` resultaron ser single-branch a pesar
+  del nombre "Global" — ese "Global" parece referirse a "todas las
+  marcas/productos", no "todas las sucursales".
+
+- **Validador "archivo es multi-sucursal" en parser de imports.**
+  Cuando se confirme el formato multi-branch real (deuda anterior),
+  el parser debe rechazar archivos single-branch para mantener la
+  convención. Depende de la deuda anterior.
+
+- **Polish de UI diferido hasta MVP completo.** La página /imports
+  (Fase 9) usa estilos mínimos a propósito. Decisión consciente:
+  primero tener todas las páginas del MVP funcionando, después
+  iterar UX/UI con visión completa del sistema. Evita rediseñar
+  varias veces.
 
 ---
 

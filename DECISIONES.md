@@ -300,32 +300,41 @@ MARCA-MODELO-GENERO-MATERIAL-COLOR
   declarativos `FRESHNESS_STYLES` y `STATUS_STYLES` con tipos `Record<>`
   para forzar exhaustividad en niveles conocidos. Estilo mínimo a
   propósito — polish diferido a fase futura.
+- **Fase 10** — UI `/inventory`. Cerrada el 2026-05-26. Página de
+  búsqueda de inventario con tres archivos: servicio
+  `lib/services/inventory.ts` con `searchInventory(query)` y
+  `countTotalPairs()`, Server Component `app/inventory/page.tsx`, y
+  Client Component `app/inventory/search-input.tsx` con debounce de
+  300ms. Decisiones de producto: Camino 3 (UI de "estado actual"
+  ahora, columna "rotación" diferida a Fase 11 cuando haya
+  movements); Forma A (una fila por `InventoryPosition`, granular
+  al modelo); opción (i) mejorada (página vacía con buscador +
+  contador total como mensaje guía). Decisiones técnicas:
+  URL-as-state (no API route — el input cambia `?q=`, el Server
+  Component re-renderiza con el nuevo param); búsqueda case-
+  insensitive vía `.toUpperCase()` en el query del servicio
+  (SQLite no soporta `mode: "insensitive"` en Prisma 7, y los
+  productos del legacy están todos en mayúsculas); límite de 100
+  resultados por búsqueda. Stack agregado: componente shadcn
+  `Input`. Verificado en navegador con los 6 casos (vacío, match,
+  borrar, mayúsculas/minúsculas, sin resultados, refrescar con
+  `?q=` en URL).
 
 ## 10. Fase actual
 
-**Fase 9 cerrada (2026-05-20)** — UI `/imports`. Resumen detallado
-en sección 9. La página muestra el card de freshness arriba con
-semáforo de 5 niveles y la tabla de historial abajo con badges de
-status. Verificado en navegador con DB real (12 ImportJobs).
-Stack agregado: shadcn/ui (preset Nova + Radix), componentes Card,
-Table, Badge. Mapas declarativos `FRESHNESS_STYLES` y `STATUS_STYLES`
-para mapear estados → label/color. Lógica del semáforo en función pura
-`calculateFreshnessLevel(lastSuccessful, lastAttempt, now)` — testeable
-porque `now` se inyecta como parámetro.
+**Fase 10 cerrada (2026-05-26)** — UI `/inventory`. Resumen detallado
+en sección 9. Búsqueda con debounce, URL-as-state, Forma A granular.
 
-**Fase 10 — pendiente de definición.**
+**Fase 11 — pendiente de definición.**
 
-Candidatas para la próxima fase, en orden tentativo de prioridad:
-
-- **UI de inventario.** Páginas para ver/buscar InventoryPosition.
-  Probablemente filtros por sucursal, marca, modelo. Es lo más
-  cercano al valor inmediato para el operador (saber qué hay en
-  qué sucursal). Requiere paginación o virtual scroll (8,000+ filas
-  en DB hoy, va a crecer).
+Candidatas para la próxima fase (lista heredada de Fase 10, en orden
+tentativo de prioridad):
 
 - **Importer de ventas.** Movements OUT desde archivos VENTACHARLY
   o MARZOVENTAS. Requiere diseño formal: ¿cómo se reconcilia un
   snapshot de existencias con movimientos individuales de venta?
+  Bloqueante para columna "rotación" en `/inventory` (deuda
+  registrada en Fase 10).
 
 - **Importer de compras.** Movements IN desde COMPRASMARZO. Similar
   al anterior, simétrico (IN en vez de OUT).
@@ -333,45 +342,16 @@ Candidatas para la próxima fase, en orden tentativo de prioridad:
 - **Refactor `process.exit(1)` → `throw` del parser** (deuda registrada
   en sección 11). Necesario antes de exponer el parser desde una
   Server Action o Route Handler — actualmente mataría el servidor
-  Next si fallara.
+  Next si fallara. Bloqueante para los importers de arriba.
 
-- **Resolver edge case "snapshot mintió"** (registrado más abajo en
-  esta sección). Requiere implementar diff contra DB al persistir.
+- **Resolver edge case "snapshot mintió"** (registrado en histórico
+  de Fase 8). Requiere implementar diff contra DB al persistir.
+
+- **Polish de `/inventory`:** paginación cuando los resultados pasen
+  de 100, filtros rápidos por sucursal/marca, ordenamiento por
+  columna. Diferido hasta tener visión completa del MVP (sección 11).
 
 Decisión específica diferida a inicio de sesión próxima.
-
----
-
-**Histórico — edge case heredado de Fase 8 (no resuelto):**
-
-Si un snapshot posterior NO menciona una posición que SÍ existe en DB
-con stock, la posición queda intacta — el parser no genera tupla para
-ella y `persistTuples` nunca la toca. NO se manifiesta dentro de un
-solo import (no hay datos previos contra los que comparar), pero SÍ
-entre imports consecutivos:
-
-- Día 1: import dice (branch=1, producto X, talla 27.0) = 5 pares.
-  DB queda en 5.
-- Día 2: se vendieron los 5. El legacy ya no imprime esa fila
-  (celda vacía, no 0). El parser no genera tupla para esa posición.
-  `persistTuples` no la toca. DB sigue diciendo 5. **Snapshot mintió.**
-
-Por qué pasa: el filtro `> 0` en `parseProducts` y la decisión del
-legacy de emitir vacío (no 0) en filas SUC se combinan para que
-"no aparece en el archivo" sea indistinguible de "no está en el
-rango de tallas del producto".
-
-Estrategia para resolver (diferida): al procesar un snapshot, hacer
-un diff contra el estado actual de la DB para el conjunto de
-(branches, productos) que aparecen en el archivo, y generar tuplas
-con quantity=0 para las posiciones que existían y ya no aparecen.
-Decisión de diseño pendiente: ¿alcance del diff? ¿solo dentro de
-productos mencionados, o también productos que aparecían antes y
-ya no aparecen en absoluto?
-
-Para el MVP de Fase 8 (primer import a DB vacía) este bug no se
-manifestó. Se va a manifestar el día que tu tío empiece a importar
-diario con datos previos en DB.
 
 ## 11. Decisiones pendientes / preguntas abiertas
 
@@ -442,6 +422,31 @@ diario con datos previos en DB.
   primero tener todas las páginas del MVP funcionando, después
   iterar UX/UI con visión completa del sistema. Evita rediseñar
   varias veces.
+
+- **Columna "rotación" en `/inventory` diferida a Fase 11+.** Fase 10
+  cerró con Camino 3: la UI muestra estado actual sin rotación. La
+  columna queda reservada para cuando haya `InventoryMovement` con
+  ventas reales (depende del importer de ventas). Honestidad
+  explícita al usuario: hoy no hay datos suficientes para "qué se
+  mueve poco". Decisión de UI cuando exista: ¿mostrar columna
+  desde ya con "—" hasta tener datos, o agregarla cuando aparezca?
+  Pendiente.
+
+- **Búsqueda en `/inventory` solo por `fullDescription`.** Hoy
+  `searchInventory(query)` matchea solo contra `fullDescription`
+  con `contains`. No usa los campos descompuestos (`brand`,
+  `modelNumber`, `gender`, `material`, `color`) ni `code` de Branch.
+  Suficiente para el MVP porque `fullDescription` contiene toda
+  la info concatenada — buscar "CHARLY" matchea por marca, "79340"
+  por modelo, "BLANCO" por color. Si en el futuro se quiere búsqueda
+  más estructurada (filtros separados por marca/género), refactorizar.
+
+- **Sin paginación en `/inventory`.** Límite duro de 100 resultados
+  por búsqueda. Si tu tío busca algo muy genérico ("NIÑO") y hay
+  más de 100 matches, ve solo los primeros 100 sin advertencia.
+  Aceptable para MVP — el usuario refina la búsqueda. Cuando
+  agreguemos paginación o se quiera advertir "hay más resultados,
+  refiná", iterar.
 
 ---
 

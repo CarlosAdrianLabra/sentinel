@@ -22,11 +22,7 @@ type InventoryTuple = z.infer<typeof InventoryTupleSchema>;
 function getFilePathFromArgs(): string {
   const filePath = process.argv[2];
   if (!filePath) {
-    console.error("Error: falta el argumento <ruta-al-archivo.xlsx>");
-    console.error(
-      "Uso: pnpm tsx scripts/import-existencias.ts <ruta-al-archivo.xlsx>",
-    );
-    process.exit(1);
+    throw new Error("falta el argumento <ruta-al-archivo.xlsx>");
   }
   return filePath;
 }
@@ -38,8 +34,7 @@ function readWorkbook(filePath: string) {
 function selectDataSheet(workbook: XLSX.WorkBook): string {
   const sheetName = workbook.SheetNames.find((name) => name.startsWith("rpt"));
   if (!sheetName) {
-    console.error("Error: no se encontró ninguna hoja que empiece con 'rpt'");
-    process.exit(1);
+    throw new Error("No se encontró ninguna hoja que empiece con 'rpt'");
   }
   return sheetName;
 }
@@ -50,10 +45,9 @@ function extractSnapshotDate(rows: unknown[][]): string {
     return typeof firstCell === "string" && firstCell.startsWith("Impresión:");
   });
   if (!rowImpresion) {
-    console.error(
-      "Error: no se encontro ninguna linea con 'Impresión:' y que sea un string",
+    throw new Error(
+      "no se encontro ninguna linea con 'Impresión:' y que sea un string",
     );
-    process.exit(1);
   }
   const cellValue = rowImpresion[0] as string;
   const snapshotDateString = cellValue.replace("Impresión: ", "").trim();
@@ -371,7 +365,7 @@ async function main(): Promise<void> {
       console.error(`ImportJob ${importJobId} marcado como FAILED.`);
     }
 
-    process.exit(1);
+    throw error;
   }
 }
 

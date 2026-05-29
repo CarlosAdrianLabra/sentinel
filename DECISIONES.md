@@ -52,7 +52,7 @@ Actualizar cada vez que se tome una decisión arquitectónica nueva.
 - Prisma 7.7 + SQLite
 - Zod (instalado, no usado aún)
 - Tailwind CSS 4
-- shadcn/ui (planeado, no instalado aún)
+- shadcn/ui (preset Nova + Radix)
 
 **No usaremos en esta versión:**
 
@@ -87,11 +87,11 @@ Prisma 7 cambió varias cosas respecto a Prisma 6. Estos son los puntos crítico
 ## 5. Estructura del proyecto
 
 sentinel/
-├── app/ # Next.js App Router (vacío por ahora)
+├── app/ # Next.js App Router
 ├── generated/prisma/ # Cliente Prisma autogenerado (NO EDITAR)
 ├── lib/
 │ ├── constants/
-│ │ └── branches.ts # BRANCHES (array de 3 sucursales)
+│ │ └── branches.ts # BRANCHES (array de sucursales)
 │ └── db/
 │ └── prisma.ts # Cliente Prisma singleton (patrón globalThis)
 ├── prisma/
@@ -108,15 +108,15 @@ sentinel/
 
 ---
 
+## 6. Schema del dominio
+
 ### `Branch` — sucursales
 
-Campos:
-
 - `id` (Int) — identidad técnica interna.
-- `code` (String, @unique) — identidad operativa estable ("ABRYL", "TEZONCO", "ECOMM", "MARISOL").
-- `name` (String) — nombre operativo corto para mostrar en UI ("Abryl", "Tezonco", "e-commerce", "Marisol"). Distinto de `legacyStoreName`.
+- `code` (String, @unique) — identidad operativa estable ("ABRYL", "TEZONCO", "ECOMM", "MIRASOL").
+- `name` (String) — nombre operativo corto para UI ("Abryl", "Tezonco", "e-commerce", "Mirasol"). Distinto de `legacyStoreName`.
 - `legacyStoreId` (String, @unique) — puente con INVENSHOES ("1", "2", "4", "5").
-- `legacyStoreName` (String?, opcional) — nombre como aparece en el legacy (ej. "Adrian Granados Del Llano").
+- `legacyStoreName` (String?, opcional) — nombre como aparece en el legacy (ej. "ADRIAN GRANADOS DEL LLANO").
 - `isActive` (Boolean, default true), `createdAt`, `updatedAt` — metadata estándar.
 
 ### `Product` — SKUs
@@ -133,10 +133,7 @@ Campos:
 ### `InventoryMovement`
 
 - Append-only (nunca se edita ni borra; errores se compensan con movimientos inversos).
-- `movementType` como String validado por Zod: `IN | OUT | ADJUSTMENT | IMPORT_SET`. Los traspasos entre sucursales se modelan como dos movimientos con
-  el mismo `referenceId`: un `OUT` en la sucursal origen + un `IN` en
-  la sucursal destino. El `referenceId` compartido los vincula como
-  una sola operación lógica.
+- `movementType` como String validado por Zod: `IN | OUT | ADJUSTMENT | IMPORT_SET`. Los traspasos entre sucursales se modelan como dos movimientos con el mismo `referenceId`: un `OUT` en la sucursal origen + un `IN` en la sucursal destino.
 - `quantityDelta` puede ser negativo.
 - `referenceId` apunta a ImportJob.id u otros folios externos.
 
@@ -156,55 +153,38 @@ Campos:
 
 ## 7. Mapeo de sucursales
 
-| ID legacy | Nombre en INVENSHOES      | Code operativo | Nombre operativo |
-| --------- | ------------------------- | -------------- | ---------------- |
-| `"1"`     | Adrian Granados Del Llano | `ABRYL`        | Abryl            |
-| `"2"`     | Carlos Del Llano Robles   | `TEZONCO`      | Tezonco          |
-| `"4"`     | Marisol                   | `MARISOL`      | Marisol          |
-| `"5"`     | Sport Tenis               | `ECOMM`        | e-commerce       |
+**Catálogo completo verificado con Jesus el 2026-05-28** (captura del dropdown de selección de sucursal del legacy):
 
-Las sucursales viven en `lib/constants/branches.ts` como constante y se siembran con `prisma/seed.ts`.
+| ID legacy | Nombre en INVENSHOES                              | Code operativo | Nombre operativo | Estado en Sentinel |
+| --------- | ------------------------------------------------- | -------------- | ---------------- | ------------------ |
+| `"1"`     | ADRIAN GRANADOS DEL LLANO                         | `ABRYL`        | Abryl            | activa, física     |
+| `"2"`     | CARLOS DEL LLANO ROBLES                           | `TEZONCO`      | Tezonco          | activa, física     |
+| `"3"`     | LUIS REY                                          | —              | —                | muerta, NO se siembra |
+| `"4"`     | MIRASOL                                           | `MIRASOL`      | Mirasol          | virtual (apartados) |
+| `"5"`     | SPORT TENIS                                       | `ECOMM`        | e-commerce       | virtual (canal externo) |
+| `"9"`     | TIENDAS DE ROPA Y CALZADO ABRIL S.A. DE C.V.      | —              | —                | TBD según archivo de existencias multi-sucursal |
 
-**Nota sobre ECOMM (branch 5 / Sport Tenis):**
-ECOMM no es una bodega física. Es un canal de ventas llevado por un
-distribuidor externo (Sport Tenis) que acepta vales de despensa y
-entrega al cliente final. En el legacy, las ventas de e-commerce se
-registran como _traspaso_ de ABRYL o TEZONCO hacia ECOMM — indicando
-que el zapato físico salió de la bodega de la tienda y ahora está
-asignado al distribuidor, pendiente de entrega. Semánticamente, el
-"stock de ECOMM" es inventario consignado/en-tránsito, no bodega
-propia. Esto afecta cómo se interpretan los archivos de existencias
-de ECOMM y cómo se modelan los movimientos de venta de e-commerce.
+Las sucursales activas viven en `lib/constants/branches.ts` como constante y se siembran con `prisma/seed.ts`.
 
-**Nota sobre MARISOL (branch 4):**
-MARISOL no es una bodega física. Es una "sucursal virtual" que el
-legacy usa para representar el estado "apartado". Cuando un cliente
-aparta un zapato en ABRYL o TEZONCO, el legacy hace un traspaso desde
-la sucursal de origen hacia MARISOL; el zapato físicamente sigue en
-la bodega de origen, en una sección designada "apartado", pero el
-reporte de existencias lo cuenta en MARISOL (SUC. 4), NO en la
-sucursal física donde está.
+**ATENCIÓN — corrección crítica de nombres (2026-05-28):** versiones anteriores de DECISIONES escribían **MARISOL** (con A). El nombre real en el legacy es **MIRASOL** (con I) — verificado en la captura del 2026-05-28. El `code` de Branch debe ser `MIRASOL`. Pendiente verificar la ortografía exacta cuando llegue el archivo de existencias multi-sucursal (header de sucursal 4).
 
-Implicaciones:
+**Historia operativa (contada por Jesus el 2026-05-28):** antes de la pandemia había sucursales físicas Abryl, Tezonco, Luis Rey, Mirasol, más Sport Tenis y Supercalza. Las dos más pequeñas (Mirasol y Supercalza) cerraron por números rojos durante la pandemia. El programador del legacy cobraba por borrar registros, así que los "cascarones" de sucursal quedaron en el sistema. Algunos se reutilizaron como sucursales virtuales:
 
-- Si alguien pregunta "¿cuántos zapatos tengo físicamente en Abryl?",
-  la respuesta verdadera es `stock(ABRYL) + stock(MARISOL que vino de ABRYL)`.
-- Si el cliente recoge el apartado, se concreta la venta (movimiento OUT en MARISOL).
-- Si no lo recoge, el legacy hace un traspaso inverso MARISOL → sucursal original.
-- El propósito del diseño en el legacy (por qué es una sucursal separada
-  en vez de una marca de "reservado") es desconocido — pendiente de
-  preguntar al operador del legacy.
+- **MIRASOL (4)** → apartados. Cuando un cliente aparta un par, el legacy hace traspaso `ABRYL → MIRASOL` o `TEZONCO → MIRASOL`. El zapato físicamente sigue en la sucursal de origen, pero el reporte de existencias lo cuenta en MIRASOL.
+- **SPORT TENIS (5)** → e-commerce. Distribuidor externo que acepta vales de despensa y entrega al cliente final. Las ventas de e-commerce se registran como movimientos hacia esta sucursal.
 
-En Sentinel, por pragmatismo en MVP, MARISOL se modela como una Branch
-más (así viene en los datos). Cuando lleguemos a reportes de
-reconciliación física, probablemente haya que repensarlo (¿MARISOL es
-branch o es un estado?) — decisión diferida.
+**Sucursales muertas pero presentes en el catálogo:**
+
+- **Luis Rey (3):** confirmado por Jesus, "no aparece en reportes". No se siembra en Sentinel. Si apareciera por sorpresa en algún archivo, el parser abortaría con `throw` y nos enteraríamos. Defensa por error explícito.
+- **Abril S.A. (9):** Jesus dijo inicialmente "no se ocupa", **pero Carlos descubrió el 2026-05-28 que sí tiene stock real** — específicamente ropa que nunca se movió de registro. La 9 quedó como cascarón legal de una razón social vieja del grupo (de donde viene el nombre operativo "ABRYL", derivado de "ABRIL" — coincidencia verificada y aclarada). Decisión sobre cómo manejarla en Sentinel: **diferida hasta abrir el archivo de existencias multi-sucursal real** y ver si trae filas con sucursal 9 y qué productos. Si solo trae ropa (no zapato), probablemente la sembramos `isActive: false` por defensa pero la ignoramos en flows operativos.
+
+**Lección operativa registrada el 2026-05-28:** "no se ocupa" según el operador NO es lo mismo que "no aparece en los datos". Nadie tiene el mapa completo del legacy en la cabeza. Verificar siempre contra los archivos reales antes de cablear suposiciones.
 
 ---
 
 ## 8. Formato del legacy INVENSHOES
 
-Análisis de archivos reales (MARZOVENTAS.xlsx, CHARLYEXISTENCIA.xlsx, VENTACHARLY79340.xlsx, COMPRASMARZO.xlsx, rptNewVentasGlobal.xlsx, rptNewInvetarioGlobalSinVenta.xlsx, Converse.xlsx).
+Análisis de archivos reales (MARZOVENTAS.xlsx, CHARLYEXISTENCIA.xlsx, VENTACHARLY79340.xlsx, COMPRASMARZO.xlsx, rptNewVentasGlobal.xlsx, rptNewInvetarioGlobalSinVenta.xlsx, Converse.xlsx, rptNewVentasCorrdiaCompleta.xlsx [Abryl y Tezonco samples], rptNewVentasDetalle.xlsx [ECOMM sample], rptNewVentasDetallegeneral.xlsx).
 
 **Formato de descripción de producto: 100% consistente.**
 MARCA-MODELO-GENERO-MATERIAL-COLOR
@@ -225,41 +205,26 @@ MARCA-MODELO-GENERO-MATERIAL-COLOR
 **Formato block-per-product (observado en CHARLYEXISTENCIA.xlsx):**
 
 - NO es tabular. Es un reporte tipo Crystal Reports.
-- Dos hojas: "Mapa del documento" (TOC auto-generado, se ignora) y
-  la hoja de datos real (nombre tipo `rptNewInventarioGlobal...`).
-- Header del archivo (~14 filas): metadatos como `Sucursal:`,
-  filtros aplicados (Marca, Proveedor, etc.), fecha de impresión,
-  cantidad total, importe total.
+- Dos hojas: "Mapa del documento" (TOC auto-generado, se ignora) y la hoja de datos real (nombre tipo `rptNewInventarioGlobal...`).
+- Header del archivo (~14 filas): metadatos como `Sucursal:`, filtros aplicados (Marca, Proveedor, etc.), fecha de impresión, cantidad total, importe total.
 - Después del header, bloques repetitivos de ~4 filas por producto:
   1. Fila con `fullDescription` del producto (en columna 1).
   2. Header de tallas: `SUC. CANT. COSTO IMPORTE` + columnas de tallas.
   3. Fila(s) de datos: sucursal, cantidad, costo, importe, cantidades por talla.
   4. Fila `TOT.` con totales.
-- Las columnas de tallas **varían por producto** (niños 11.0-21.0,
-  adultos 25.0-31.0). El parser debe leer la fila header de cada
-  producto para mapear columna → talla.
-- Un archivo exportado filtrado por sucursal contiene solo esa sucursal
-  (la sucursal está en el header, no por fila). Un archivo multi-sucursal
-  presumiblemente tiene múltiples filas de datos por producto — formato
-  pendiente de confirmar cuando tengamos un archivo real.
-- Timestamp "Impresión: DD/MM/YYYY HH:MM" en el header indica el momento
-  del snapshot. El parser debe capturarlo en el `ImportJob`, no usar
-  `new Date()` al importar.
+- Las columnas de tallas **varían por producto** (niños 11.0-21.0, adultos 25.0-31.0). El parser debe leer la fila header de cada producto para mapear columna → talla.
+- Timestamp "Impresión: DD/MM/YYYY HH:MM" en el header indica el momento del snapshot. El parser debe capturarlo en el `ImportJob`, no usar `new Date()` al importar.
 
-**Qué reporte exporta este formato:**
+**Qué reporte exporta este formato (estado al 2026-05-28):**
 
-- `Converse.xlsx` (Fase 8) — confirmado multi-sucursal (3 sucursales en
-  filas separadas dentro de cada bloque). Reporte exacto desconocido,
-  pendiente de averiguar con Jesus.
-- `rptNewInvetarioGlobalSinVenta.xlsx` (verificado 2026-05-27) — single-
-  sucursal a pesar del nombre "Global". Header dice `Sucursal: 1] TIENDAS
-  ADRIAN GRANADOS`. "Global" en INVENSHOES significa "todas las
-  marcas/productos/líneas", **no** "todas las sucursales".
+- `Converse.xlsx` (Fase 8) — confirmado multi-sucursal (3 sucursales en filas separadas dentro de cada bloque). **Reporte exacto sigue sin identificarse** — pendiente con Jesus.
+- `rptNewInvetarioGlobalSinVenta.xlsx` (verificado 2026-05-27) — single-sucursal a pesar del nombre "Global". Header dice `Sucursal: 1] TIENDAS ADRIAN GRANADOS`. "Global" en INVENSHOES significa "todas las marcas/productos/líneas", **no** "todas las sucursales".
 - `CHARLYEXISTENCIA.xlsx` — single-sucursal, filtrado por marca CHARLY.
+- **Reporte de existencias por criterio (GLOBAL)** del menú del legacy — identificado en captura del 2026-05-28, permite filtrar por sucursal `--TODAS--`. Jesus arrancó la generación pero estaba tardando >3 horas al cierre de sesión. **Pendiente verificar formato cuando termine.** Si truena o tarda demasiado, plan B es exportar single-sucursal × 4 archivos (1, 2, 4, 5) y que Sentinel los combine en un solo ImportJob.
 
 ### 8.2. Reportes de ventas
 
-**Existen dos formatos completamente distintos**, no la misma data en dos vistas.
+**Existen MÚLTIPLES formatos en INVENSHOES**, no la misma data en distintas vistas. Análisis completo del 2026-05-28:
 
 **Formato A — Reporte Sumarizado de Ventas (summary).**
 Observado en MARZOVENTAS.xlsx y rptNewVentasGlobal.xlsx:
@@ -267,98 +232,96 @@ Observado en MARZOVENTAS.xlsx y rptNewVentasGlobal.xlsx:
 - Tabular plano. Una fila por producto con totales del período.
 - Columnas: `DESCRIPCION | CANTIDAD | DESCUENTO | TOTAL`.
 - **Sin tallas. Sin desglose por sucursal. Sin fechas dentro del período.**
-- rptNewVentasGlobal.xlsx tiene filtro `Sucursal: TODAS` pero **agrega
-  todas las sucursales en una sola fila por producto** — no las separa
-  en secciones tipo "SUCURSAL 1, SUCURSAL 2, ...". El desglose por
-  sucursal se pierde completamente.
-- Negativos existen (devoluciones).
-- Filas con cantidad 0 pero descuento/total ≠ 0 existen (probablemente
-  cambios sin movimiento neto).
-- Footer: `Abonos`, `Dif. Cambios`, `N.C. Recibidas`.
-- GRAN TOTAL al final.
+- rptNewVentasGlobal.xlsx tiene filtro `Sucursal: TODAS` pero agrega todas las sucursales en una sola fila por producto.
 
-**Decisión:** este formato es **descartado** como fuente para
-`InventoryMovement`. Pierde toda la granularidad que el modelo necesita
-(talla y sucursal). Sirve a lo sumo como sanity-check agregado.
+**Decisión:** **descartado** como fuente para Sentinel.
 
-**Formato B — Ventas por corrida completa (detail).**
-Observado en VENTACHARLY79340.xlsx:
+**Formato B — Ventas por corrida completa (detail con tallas).**
+Observado en VENTACHARLY79340.xlsx, rptNewVentasCorrdiaCompleta.xlsx (Abryl), rptNewVentasCorrdiaCompletatezonco.xlsx:
 
-- Bloque-por-producto, **mismo formato que existencias**. Header de
-  producto → header de tallas (centésimas, idénticas a existencias) →
-  filas de datos por qualifier → TOT.
-- Columnas adicionales: `TOTAL$`, `PRE1`, `PRE2`.
-- **Tiene tallas por columna**, como existencias.
-- **La columna SUC. usa "qualifiers" — no solo un número de sucursal.**
-  Observado: `1` (venta directa desde sucursal 1) y `1-M-` (venta de
-  sucursal 1 que pasó por el flujo de apartado/MARISOL). En el sample
-  de CHARLY-79340-NIÑO-SINTETICO-BLANCO: 4 pares con qualifier `1`, 16
-  pares con qualifier `1-M-`. La fila `TOT.` (=20) coincide con la
-  CANTIDAD que reporta el formato summary para el mismo producto.
-- El sample disponible está filtrado a `Sucursal: 1` + `Modelo: 79340`.
-  No tenemos sample multi-sucursal. **Pendiente confirmar:** ¿el
-  legacy permite exportar este reporte sin filtros? ¿Existen qualifiers
-  para ECOMM (`1-E-`?), para traspasos entre sucursales (`1-2-`?), etc.?
+- Bloque-por-producto, mismo formato que existencias. Header de producto → header de tallas (centésimas) → filas de datos por qualifier → TOT.
+- Columnas: `TOTAL`, `TOTAL$`, `PRE1`, `PRE2` + tallas.
+- Single-sucursal por archivo. **Multi-sucursal NO se puede generar** — el legacy lo cancela con error "Cancelado por el usuario" aunque nadie cancele (probablemente timeout interno o falta de memoria en el servidor viejo).
 
-**Decisión:** este formato es la **fuente correcta** para movements OUT.
-El parser de existencias es ~80% reutilizable.
+**Decisión:** **descartado** como fuente primaria porque no se puede sacar multi-sucursal. Queda como referencia histórica.
 
-### 8.3. Reportes de compras
+**Formato C — Detalle de Ventas (FORMATO OFICIAL ELEGIDO).**
+Observado en rptNewVentasDetalle.xlsx (ECOMM single-sucursal) y **rptNewVentasDetallegeneral.xlsx** (multi-sucursal, header `Sucursal: TODAS`):
 
-**Formato observado (COMPRASMARZO.xlsx) — Resumen de operaciones de compras:**
+- Bloque-por-producto, mismo formato que existencias y que Formato B.
+- **Columnas más ricas que Formato B:** `CANT.`, `COSTO/U`, `PRECIO/U`, `CAMB.` (cambios), `DEV.` + `IMP. DEV.` (devoluciones), `DESC <=10`, `DESC>10`, `DESC. TOT.`, `TOTAL`, `UTILIDAD`, `UTILIDAD %`, `ROTACION`, más las columnas de talla.
+- **Devoluciones vienen en columnas separadas**, no como cantidades negativas. Un cambio (cliente devuelve un par y compra otro) aparece como fila con `CANT.=0` + columna `DEV.` con valor 1 en el `TOT.`.
+- **Se saca rápido (2-5 minutos)** según Jesus, incluso multi-sucursal. Cadencia diaria confirmada como factible.
+- **Multi-sucursal funciona:** un mismo bloque puede tener filas con qualifiers de distintas sucursales antes del `TOT.`.
+
+**Decisión (2026-05-28):** **`Detalle de Ventas` con `Sucursal: TODAS` es el reporte oficial de ventas para Sentinel.** Es el que vamos a parsear en Fase 11.
+
+### 8.3. Qualifiers en la columna SUC. de los reportes de ventas
+
+Catálogo completo verificado en rptNewVentasDetallegeneral.xlsx (2026-05-28, sample multi-sucursal de 113 filas):
+
+| Qualifier | Branch destino | Comentario |
+|-----------|---------------|-----|
+| `1`       | ABRYL (1)     | poco frecuente (5 de 113 filas) |
+| `1-M-`    | ABRYL (1)     | el caso común (57 de 113) |
+| `2`       | TEZONCO (2)   | poco frecuente (1 de 113) |
+| `2-M-`    | TEZONCO (2)   | el caso común (26 de 113) |
+| `5`       | ECOMM (5)     | único qualifier para ECOMM (24 de 113), sin variante `-M-` |
+| `4` o `4-M-` | **No existe** | MIRASOL nunca aparece en ventas |
+
+**Interpretación del sufijo `-M-`:** Jesus dice que es para distinguir "turno mañana vs tarde" o quizás "tarjeta vs efectivo" (su explicación fue tentativa). Los datos no cuadran con la interpretación literal de turno — un día normal a las 2 PM tiene 17 ventas `1-M-` vs 1 sola `1`. **Para Sentinel esto no importa**: ambos qualifiers van al mismo branch físico operativo. El parser **descarta el sufijo** al normalizar.
+
+**Regla del parser de ventas:**
+
+```
+qualifier "X" o "X-M-"  →  branch X (legacyStoreId)
+qualifier "4" o "4-M-"  →  ERROR (no debería existir en este reporte)
+cualquier otro          →  throw (catálogo desconocido)
+```
+
+**Flujo de apartados (explicado por Jesus el 2026-05-28):**
+
+1. Cliente **aparta** un par en ABRYL → legacy hace traspaso `ABRYL → MIRASOL`. Stock virtual se mueve, zapato físicamente sigue en ABRYL.
+2. Cliente **termina de pagar** → legacy hace **traspaso reverso `MIRASOL → ABRYL`** + **registra la venta como cualquier venta normal de ABRYL** (qualifier `1` o `1-M-`).
+
+Implicaciones:
+
+- **Cierre de apartado y venta directa son INDISTINGUIBLES en el archivo de ventas.** Ambos se ven igual: venta normal de la sucursal física. Sentinel no puede separarlos. Por suerte no lo necesita.
+- **MIRASOL solo se mueve por traspasos**, que NO aparecen en el archivo de ventas. Solo se ven en diff entre snapshots de existencias.
+- Si en el futuro se quiere auditoría fina ("qué apartados se cerraron y cuándo"), habría que pedir export de traspasos al legacy si existe. **Fuera del MVP.**
+
+**Decisión revertida (2026-05-28):** la regla anterior "OUT desde MARISOL para qualifier `1-M-`" queda **anulada**. Era hipótesis basada en interpretar mal el qualifier — pensábamos que `1-M-` marcaba ventas vía apartado/MARISOL, pero en realidad ambos `1` y `1-M-` son ventas regulares de la sucursal 1. La explicación correcta del flujo está arriba.
+
+### 8.4. Reportes de compras
+
+**Formato observado (COMPRASMARZO.xlsx):**
 
 - Jerárquico: `Proveedor → Sucursal → Referencia (folio + fecha) → Articulos`.
-- Cada artículo: `CORRIDA` (rango de tallas tipo `"DEL 22 AL 26.5"`),
-  `CANTIDAD` (agregada sobre el rango), `COSTO`, `IMP. BRUTO`,
-  `IMP. FACTURA`, `IMP. PAGO`.
-- **Sin desglose por talla individual.** El rango (CORRIDA) es lo más
-  granular disponible.
-- Sí tiene fecha por folio.
-- Jerarquía de totales: TOTALREFERENCIA → TOTAL SUCURSAL → TOTAL
-  PROVEEDOR → TOTAL.
+- Cada artículo: `CORRIDA` (rango de tallas tipo `"DEL 22 AL 26.5"`), `CANTIDAD` (agregada sobre el rango), costos varios.
+- **Sin desglose por talla individual.** El rango (CORRIDA) es lo más granular disponible.
 
-**Decisión (sesión 2026-05-27):** compras **descartadas del scope MVP**.
-Justificación: Jesus mantiene el legacy actualizado al recibir cada
-lote (etiquetado físico + captura), por lo que el siguiente snapshot
-de existencias ya refleja el +N de las compras. Importar COMPRASMARZO
-solo aportaría información financiera (cuánto se gastó), que no es lo
-que Sentinel resuelve. Eventualmente puede reconsiderarse si se quiere
-auditoría financiera, pero requiere export con talla individual (no
-existe hoy).
+**Decisión (2026-05-27, confirmada 2026-05-28):** compras **descartadas del scope MVP**. Justificación: Jesus mantiene el legacy actualizado al recibir cada lote (etiquetado físico + captura), por lo que el siguiente snapshot de existencias ya refleja el +N de las compras. Importar COMPRASMARZO solo aportaría información financiera (cuánto se gastó), que no es lo que Sentinel resuelve.
 
-### 8.4. Detalles técnicos del parser xlsx
+### 8.5. Cardex (pendiente de investigar)
+
+Jesus mencionó el 2026-05-28 que existe un reporte tipo "cardex" en el legacy. Cardex en contabilidad tradicional es el libro mayor de movimientos por producto (transaccional, con fechas y tipos de movimiento explícitos). **Si el cardex del legacy es transaccional**, podría ser incluso mejor fuente que `Detalle de Ventas` para algunos casos.
+
+**Pendiente:** pedirle a Jesus un sample de cardex de un solo producto para inspeccionar el formato. No urgente — el plan actual con Detalle de Ventas funciona — pero vale la pena conocer.
+
+### 8.6. Detalles técnicos del parser xlsx
 
 **Detalles observados al parsear con `xlsx` (SheetJS):**
 
 - Al convertir la hoja con `sheet_to_json(sheet, { header: 1 })`:
-  - Columna 0 es siempre vacía. Los datos útiles arrancan en columna 1.
-  - Las tallas en la fila header vienen como **strings con padding de
-    espacios** (ej. `"1700      "`), no como números. El parser debe
-    hacer `.trim()` antes de convertir a número.
-  - Celdas vacías aparecen en tres formas: `undefined` (sparse slots,
-    se muestran como `<N empty items>` en Node), `""` (string vacío),
-    `null` (raramente). Los tres casos deben normalizarse con un helper
-    `isEmpty(cell)`.
-  - **Importante: ceros vs vacíos en filas de datos.** El legacy
-    distingue entre las dos cosas según la fila:
-    - Filas de **SUC.** (datos por sucursal): celda **vacía** cuando
-      no hay stock para esa talla. Nunca emite 0 explícito.
-    - Filas de **TOT.** (totales de bloque): emite **0 explícito**
-      cuando el total es cero.
-      Verificado visualmente en CHARLYEXISTENCIA.xlsx (2026-05-15).
-      Implicación: un filtro tipo `cantidad > 0` aplicado solo a filas
-      de SUC es indistinguible de un filtro `typeof === "number"`,
-      porque en esas filas nunca hay 0. El parser actual aprovecha esto
-      (ver sección 10).
-- Header "Sucursal: TODAS" aparece en archivos multi-sucursal.
-  El parser NO debe depender del header para obtener la sucursal —
-  siempre debe leer la sucursal de la columna 1 de cada fila de datos.
-- Un bloque de producto puede tener múltiples filas de datos (una por
-  sucursal que tiene stock) antes del `TOT.` de cierre. El parser itera
-  todas las filas entre header y TOT.
-- La fila `TOT.` es redundante para nuestros fines (los totales ya
-  los podemos calcular desde las filas de datos). Se usa solo como
-  marca de "fin de bloque".
+  - En existencias: columna 0 vacía, datos arrancan en columna 1.
+  - **En reportes de ventas (Formato C) la convención cambia:** datos arrancan en columna 0 (qualifier de sucursal está en col 0, no col 1). El parser debe detectar esto al inicio del archivo o tener dos modos.
+  - Las tallas en la fila header vienen como **strings con padding de espacios** (ej. `"1700      "`), no como números. El parser debe hacer `.trim()` antes de convertir a número.
+  - Celdas vacías aparecen en tres formas: `undefined`, `""`, `null`. Los tres casos deben normalizarse con un helper `isEmpty(cell)`.
+  - **Ceros vs vacíos en filas de datos.** El legacy distingue:
+    - Filas de **SUC.** (datos por sucursal): celda **vacía** cuando no hay stock/venta para esa talla. Nunca emite 0 explícito.
+    - Filas de **TOT.** (totales de bloque): emite **0 explícito** cuando el total es cero.
+- Un bloque de producto puede tener múltiples filas de datos (una por sucursal o por qualifier) antes del `TOT.` de cierre. El parser itera todas las filas entre header y TOT.
+- La fila `TOT.` es redundante para extracción de movements (los totales ya los calculamos desde las filas de datos). Se usa solo como marca de "fin de bloque" y validador.
 
 ---
 
@@ -369,91 +332,43 @@ existe hoy).
 - **Fase 3** — Prisma instalado, adapter configurado, primera migración (HealthCheck) validada.
 - **Fase 4** — Schema del dominio aplicado (6 entidades). SQL leído y entendido.
 - **Fase 5** — Seed de sucursales funcional e idempotente. Reto extra: script reset.ts escrito por Carlos.
-- **Fase 6** — Servicio `lib/services/branches.ts` + endpoint `GET /api/branches` funcionando. Separación servicio/handler validada. Respuesta envuelta en `{ branches: [...] }`. Manejo de errores con try/catch en el handler, log autodescriptivo, status 500 con mensaje sanitizado. Verificado en navegador en localhost:3000/api/branches.
-- **Fase 7** — Primera UI: `app/branches/page.tsx` como Server Component que llama `listBranches()` directo (sin pasar por fetch a la API). Decisión arquitectónica: Server Components consumen servicios internos; la API route queda para consumidores externos (app móvil futura, integraciones, terceros). Error handling delegado a Next.js (sin try/catch en la página; `error.tsx` pendiente). Estilado con Tailwind puro: jerarquía de texto (h1/h2/p con `text-3xl`, `text-xl`, `text-sm`), tarjetas con `border rounded-lg p-4`, separación entre tarjetas con `space-y-4`, padding de página con `p-8`. Preflight de Tailwind entendido: resetea defaults del navegador, hay que estilizar explícitamente. Dark mode automático vía `prefers-color-scheme` del layout raíz — `text-gray-400` elegido para legibilidad en modo oscuro (solución temporal hasta sistema de temas explícito).
-- **Fase 8** — Parser de existencias desde Excel legacy. Cerrada el
-  2026-05-15. CHARLY (898/898), rptNew (15166/15166 para productos
-  zapato). Verificador de TOT permanente, ImportJob persistido con
-  snapshotDate, manejo de errores con markImportJobFailed.
-- **Fase 9** — UI `/imports`. Página Server Component que llama a
-  `getImportsPageData()` (en `lib/services/imports.ts`). Muestra:
-  card de freshness arriba (semáforo con 5 niveles: AL_DIA, PENDIENTE,
-  DESACTUALIZADO, FALLO, SIN_DATOS) + tabla shadcn abajo con historial
-  completo. Lógica del semáforo en función pura `calculateFreshnessLevel`
-  con parámetro `now` inyectado (testeable). shadcn/ui instalado con
-  preset Nova + Radix; componentes en uso: Card, Table, Badge. Mapas
-  declarativos `FRESHNESS_STYLES` y `STATUS_STYLES` con tipos `Record<>`
-  para forzar exhaustividad en niveles conocidos. Estilo mínimo a
-  propósito — polish diferido a fase futura.
-- **Fase 10** — UI `/inventory`. Cerrada el 2026-05-26. Página de
-  búsqueda de inventario con tres archivos: servicio
-  `lib/services/inventory.ts` con `searchInventory(query)` y
-  `countTotalPairs()`, Server Component `app/inventory/page.tsx`, y
-  Client Component `app/inventory/search-input.tsx` con debounce de
-  300ms. Decisiones de producto: Camino 3 (UI de "estado actual"
-  ahora, columna "rotación" diferida a Fase 11 cuando haya
-  movements); Forma A (una fila por `InventoryPosition`, granular
-  al modelo); opción (i) mejorada (página vacía con buscador +
-  contador total como mensaje guía). Decisiones técnicas:
-  URL-as-state (no API route — el input cambia `?q=`, el Server
-  Component re-renderiza con el nuevo param); búsqueda case-
-  insensitive vía `.toUpperCase()` en el query del servicio
-  (SQLite no soporta `mode: "insensitive"` en Prisma 7, y los
-  productos del legacy están todos en mayúsculas); límite de 100
-  resultados por búsqueda. Stack agregado: componente shadcn
-  `Input`. Verificado en navegador con los 6 casos (vacío, match,
-  borrar, mayúsculas/minúsculas, sin resultados, refrescar con
-  `?q=` en URL).
+- **Fase 6** — Servicio `lib/services/branches.ts` + endpoint `GET /api/branches`. Separación servicio/handler validada.
+- **Fase 7** — Primera UI: `app/branches/page.tsx` como Server Component. Decisión arquitectónica: Server Components consumen servicios internos; la API route queda para consumidores externos.
+- **Fase 8** — Parser de existencias desde Excel legacy. Cerrada el 2026-05-15.
+- **Fase 9** — UI `/imports` con card de freshness + tabla de historial. shadcn/ui instalado.
+- **Fase 10** — UI `/inventory` con búsqueda. URL-as-state + debounce + límite de 100 resultados.
 
 ---
 
 ## 10. Fase actual
 
-**Fase 11 — Importer de ventas detail multi-sucursal.**
+**Fase 11 — Importer de ventas multi-sucursal usando `Detalle de Ventas`.**
 
-**Scope confirmado (sesión 2026-05-27):**
+**Scope confirmado (sesiones 2026-05-27 y 2026-05-28):**
 
-- Solo ventas. Compras descartadas del scope MVP (ver sección 8.3).
-- Solo Formato B (`Ventas por corrida completa` con tallas y qualifiers).
-  Formato A (summary) descartado.
-- `OUT` desde MARISOL para qualifier `1-M-` (apartado). Ver sección 12
-  para el principio guía detrás de esta decisión.
+- Solo ventas. Compras descartadas (ver 8.4).
+- Formato oficial: **`rptNewVentasDetallegeneral` (Detalle de Ventas multi-sucursal)**. Formatos A (summary) y B (Corrida completa) descartados.
+- Parser colapsa el sufijo `-M-` al normalizar; qualifier → branch directo según tabla en 8.3.
+- MIRASOL NO recibe movements desde el parser de ventas (los apartados cerrados se ven como ventas regulares de la sucursal física).
+- Idempotencia: **opción 3** — rechazo si ya existe ImportJob COMPLETED con mismo `source + sucursal + fecha_inicio + fecha_fin`, con override consciente (mecanismo concreto: TBD al codear, opciones flag `--force` en CLI, botón en UI, borrar ImportJob a mano, o combinación).
 
-**Trabajo de Fase 11 ya completado:**
+**Trabajo de Fase 11 ya completado (2026-05-27):**
 
-- **Refactor `process.exit(1) → throw`** del parser de existencias
-  (`scripts/import-existencias.ts`). Cerrado el 2026-05-27. Las tres
-  funciones internas (`getFilePathFromArgs`, `selectDataSheet`,
-  `extractSnapshotDate`) ahora lanzan `throw new Error(...)`. El catch
-  interno de `main()` re-lanza con `throw error;` después de ejecutar
-  su limpieza (logs + `markImportJobFailed` si corresponde). El
-  `.catch()` externo en `main().catch(...)` conserva el `process.exit(1)`
-  porque es la capa CLI y necesita propagar exit codes correctos al
-  shell. Verificado: archivo válido → exit 0, archivo inexistente →
-  exit 1, ImportJob no se crea como huérfano cuando el error ocurre
-  antes de `createImportJob`. Habilita exponer el parser desde Server
-  Actions sin matar el proceso de Next en errores.
+- **Refactor `process.exit(1) → throw`** del parser de existencias. Funciones internas (`getFilePathFromArgs`, `selectDataSheet`, `extractSnapshotDate`) ahora lanzan `throw new Error(...)`. Catch interno de `main()` re-lanza con `throw error;` después de su limpieza. El `.catch()` externo conserva `process.exit(1)` como capa CLI. Verificado con archivo válido → exit 0, archivo inexistente → exit 1. Habilita exponer el parser desde Server Actions sin matar Next.
 
-**Bloqueante operativo:** confirmar con Jesus dos exports del legacy.
-Carlos pregunta el 2026-05-28. Sin estas confirmaciones, no podemos
-escribir el parser de ventas porque no sabemos el formato real
-multi-sucursal. Ver sección 11.
+**Bloqueante operativo al cierre de sesión 2026-05-28:**
 
-**Pendientes técnicos (a resolver una vez confirmados los exports):**
+- Archivo de **existencias multi-sucursal**. Jesus arrancó la generación el 2026-05-28 ~10:30am, al cierre de sesión (~3pm) seguía procesando. Sin este archivo no podemos:
+  - Verificar el formato real (¿cómo se ven los bloques con varias sucursales? ¿qué ortografía exacta usa para MIRASOL?).
+  - Confirmar si la sucursal 9 aparece y con qué productos.
+  - Sembrar el catálogo final de branches.
+- Si el archivo nunca termina o trona, plan B: exportar 4 archivos single-sucursal (1, 2, 4, 5) y que Sentinel los combine en un solo ImportJob.
 
-- **Idempotencia del re-import.** Movements append-only +
-  re-importación del mismo archivo = duplicados. Mecanismo de defensa
-  por definir (¿hash de archivo? ¿folio único por período? ¿chequeo
-  contra ImportJob previo del mismo snapshotDate?).
-- **Fecha del movement.** Los archivos agregan ventas sobre un período.
-  ¿Qué `createdAt` o equivalente le ponemos a cada movement? Opciones:
-  Fecha Final del rango, Fecha de Impresión, snapshotDate del
-  ImportJob, sumar todos al último día del período. Elegir una y
-  documentar.
-- **Catálogo de qualifiers.** Solo confirmamos `1` y `1-M-` en
-  Sucursal 1. ¿Aparecen `1-E-` (ECOMM), `1-2-` o `2-1-` (traspasos
-  entre sucursales), `1-CAN-` (cancelaciones)? Solo se sabrá al ver
-  un export multi-sucursal real.
+**Pendientes técnicos para arrancar a codear:**
+
+- **Fecha del evento del movement.** Distinto de `createdAt` (que es cuándo se guardó en la DB). La fecha del evento es cuándo ocurrió la venta en el mundo real. Como el archivo agrega ventas sobre un rango, voto provisional: **fecha del evento = Fecha Final del rango**, con convención operativa de pedirle a Jesus cadencia diaria (ya confirmó factible para Detalle de Ventas: 2-5 min generar).
+- **Mecanismo de override de idempotencia.** ¿Flag `--force` en CLI? ¿Botón en UI? ¿Borrar el ImportJob anterior a mano? ¿Combinación?
+- **Refactor del parser de existencias** para aceptar formato multi-sucursal real (bloques con varias filas SUC. por bloque). Tiene que esperar a ver el archivo.
 
 ---
 
@@ -462,108 +377,30 @@ multi-sucursal. Ver sección 11.
 - Estrategia de conflicto entre legacy y Sentinel: ¿legacy gana, Sentinel gana, o se marca conflicto? Decidir antes del primer import real.
 - Si Prisma 7 tendrá un comportamiento distinto en algún aspecto: verificar contra la documentación siempre que parezca contradictorio con Prisma 6.
 
-- **~~Manejo de errores en el parser de imports.~~** ✅ Resuelto el
-  2026-05-27 (ver sección 10). El parser ahora propaga errores con
-  `throw` en las funciones internas y reserva `process.exit(1)` para
-  la capa CLI externa.
+- **~~Manejo de errores en el parser de imports.~~** ✅ Resuelto el 2026-05-27 (ver sección 10).
 
-- **Productos no-zapato con tallas categóricas (descubierto 2026-05-15).**
-  El legacy contiene ~209 productos no-zapato — cremas, esponjas,
-  cabestrillos, andaderas, sillas de ruedas, plantillas, férulas,
-  collarines — de marcas tipo ARFAT, DAONSA, SUPER CONFORT, MEDI PAR,
-  LE ROY. Estos productos usan headers de talla categóricos (no numéricos):
-  `PZA` para pieza única, `XCHI|CHIC|MEDI|GRAN|EXTR` para ortopedia,
-  `CH00|MD00|GR00|XG00|JM00` para vendas/calcetas, etc. El parser
-  actual los detecta (genera la fila "Producto N: ...") pero ignora
-  todas sus celdas de cantidad porque sus headers no caen en el rango
-  numérico `500-4000`.
+- **Productos no-zapato con tallas categóricas (descubierto 2026-05-15).** El legacy contiene ~209 productos no-zapato — cremas, esponjas, cabestrillos, andaderas, sillas de ruedas, plantillas, férulas, collarines — con headers de talla categóricos (PZA, XCHI|CHIC|MEDI|GRAN|EXTR, etc.). El parser actual los detecta pero ignora sus celdas.
 
-  Decisión actual: **diferido**. El operador confirma que SÍ los quiere
-  en Sentinel "preferiblemente", pero no son prioridad para el MVP
-  (los zapatos son la sección principal de la tienda, después ropa,
-  después accesorios/ortopedia).
+  Decisión: **diferido**. El operador los quiere "preferiblemente" pero no son prioridad MVP. Cuando se aborde, requiere decisiones de diseño no triviales en `size` (string numérico vs categórico) y `Product` (¿agregar `productCategory`?).
 
-  Cuando se aborde (probablemente Fase N futura), requiere decisiones
-  de diseño no triviales:
-  - ¿`size` cambia de string numérico (`"17.0"`) a string libre que
-    acepta categorías (`"CHIC"`, `"PZA"`)? ¿O se agrega un campo
-    aparte tipo `sizeCategory`?
-  - ¿Product gana un campo `productCategory` (zapato | ortopedia |
-    accesorio | limpieza)? ¿O se infiere del header de tallas que
-    usa el producto?
-  - ¿Cómo se valida el campo `size` con Zod? Hoy el regex es `/^\d+\.\d$/`.
-    Si se acepta texto libre, hay que pensar enums o sets de valores
-    permitidos por categoría.
-  - Investigar antes de codear: ¿cuántos tipos distintos de header
-    categórico aparecen en los archivos del legacy? Hoy vimos 3-4
-    pero el catálogo completo puede ser más grande.
+  **Nuevo dato (2026-05-28):** la sucursal 9 (Abril S.A.) tiene stock real de **ropa**. Si el archivo de existencias multi-sucursal la trae, habrá que decidir cómo manejarla — posiblemente la misma política que productos no-zapato (skip + warning), o ignorar la sucursal 9 entera si solo trae no-zapato.
 
-  Mientras tanto, el verificador de TOT (ver sección 10) sigue
-  reportando estos productos como `parser=0, archivo=N` warnings,
-  lo cual sirve de recordatorio visible en cada import.
+- **Devoluciones explícitas en `Detalle de Ventas` (nuevo, 2026-05-28).** El formato C trae devoluciones en columnas separadas (`DEV.`, `IMP. DEV.`) y cambios como filas con `CANT.=0` + DEV en TOT. Sentinel MVP procesa solo `cantidad > 0` como `OUT`. Las devoluciones quedan como deuda: eventualmente modelarlas como movements `IN` que compensen ventas anteriores. Diferido hasta tener el OUT funcionando primero.
 
-- **Validador "archivo no regresivo" en parser de imports.** Al
-  importar un .xlsx, comparar su `snapshotDate` con el del último
-  ImportJob COMPLETED. Si el archivo nuevo es más viejo, rechazar
-  con error claro. Defiende contra subir por error un archivo
-  obsoleto de una carpeta de backups o un export antiguo. Pendiente
-  hasta tener UI de import (Fase 9+).
+- **Validador "archivo no regresivo" en parser de imports.** Al importar un .xlsx, comparar su `snapshotDate` con el del último ImportJob COMPLETED. Si el archivo nuevo es más viejo, rechazar con error claro.
 
-- **Preguntas para Jesus (2026-05-28).** Bloquean Fase 11:
-  1. **Reporte de existencias multi-sucursal.** Converse.xlsx (Fase 8)
-     era multi-sucursal real (3 sucursales en filas separadas dentro
-     de cada bloque). ¿Qué opción de menú o reporte exacto genera ese
-     formato? Confirmado el 2026-05-27: `rptNewInvetarioGlobalSinVenta`
-     **NO** es ese reporte (single-sucursal a pesar del nombre).
-  2. **Reporte de ventas multi-sucursal.** El formato
-     `Ventas por corrida completa` (sample: VENTACHARLY79340.xlsx)
-     tiene la granularidad correcta (tallas + qualifiers tipo `1-M-`).
-     ¿Existe versión sin filtros de modelo y de sucursal? ¿Se puede
-     pedir por rango de fechas arbitrario (semanal idealmente)?
-  3. **Cadencia de export.** ¿Qué tan fácil/frecuente es generar estos
-     dos reportes? Diario ideal, semanal aceptable, mensual mínimo.
+- **Preguntas pendientes para Jesus (próxima sesión):**
+  1. ¿La generación del reporte de existencias multi-sucursal terminó? ¿Cuánto tardó al final? Si truena recurrentemente, plan B.
+  2. **Cardex** — pedirle un sample de cardex de un solo producto para ver formato. ¿Es transaccional?
+  3. ¿Qué significa realmente el sufijo `-M-` en los qualifiers de ventas? Curiosidad menor, no bloqueante — los datos no cuadraron con "turno mañana vs tarde". Operador de caja sabría.
 
-- **Convención operativa: siempre archivo global multi-sucursal.**
-  Para evitar sucursales desfasadas en Sentinel, el operador debe
-  exportar siempre el reporte multi-sucursal del legacy, no archivos
-  filtrados por sucursal individual. Confirmación pendiente con
-  Jesus (ver punto anterior).
+- **Polish de UI diferido hasta MVP completo.** Las páginas `/imports` (Fase 9) y `/inventory` (Fase 10) usan estilos mínimos a propósito. Decisión consciente.
 
-- **Validador "archivo es multi-sucursal" en parser de imports.**
-  Cuando se confirme el formato multi-branch real (deuda anterior),
-  el parser debe rechazar archivos single-branch para mantener la
-  convención. Depende de la deuda anterior.
+- **Columna "rotación" en `/inventory` (diferida desde Fase 10).** La UI muestra estado actual sin rotación. **Bonus descubierto el 2026-05-28:** el formato `Detalle de Ventas` trae una columna `ROTACION` propia del legacy — investigar qué significa antes de cablearla a Sentinel.
 
-- **Polish de UI diferido hasta MVP completo.** La página /imports
-  (Fase 9) usa estilos mínimos a propósito. Decisión consciente:
-  primero tener todas las páginas del MVP funcionando, después
-  iterar UX/UI con visión completa del sistema. Evita rediseñar
-  varias veces.
+- **Búsqueda en `/inventory` solo por `fullDescription`.** Suficiente para MVP.
 
-- **Columna "rotación" en `/inventory` diferida a Fase 11+.** Fase 10
-  cerró con Camino 3: la UI muestra estado actual sin rotación. La
-  columna queda reservada para cuando haya `InventoryMovement` con
-  ventas reales (depende del importer de ventas de Fase 11). Honestidad
-  explícita al usuario: hoy no hay datos suficientes para "qué se
-  mueve poco". Decisión de UI cuando exista: ¿mostrar columna
-  desde ya con "—" hasta tener datos, o agregarla cuando aparezca?
-  Pendiente.
-
-- **Búsqueda en `/inventory` solo por `fullDescription`.** Hoy
-  `searchInventory(query)` matchea solo contra `fullDescription`
-  con `contains`. No usa los campos descompuestos (`brand`,
-  `modelNumber`, `gender`, `material`, `color`) ni `code` de Branch.
-  Suficiente para el MVP porque `fullDescription` contiene toda
-  la info concatenada — buscar "CHARLY" matchea por marca, "79340"
-  por modelo, "BLANCO" por color. Si en el futuro se quiere búsqueda
-  más estructurada (filtros separados por marca/género), refactorizar.
-
-- **Sin paginación en `/inventory`.** Límite duro de 100 resultados
-  por búsqueda. Si tu tío busca algo muy genérico ("NIÑO") y hay
-  más de 100 matches, ve solo los primeros 100 sin advertencia.
-  Aceptable para MVP — el usuario refina la búsqueda. Cuando
-  agreguemos paginación o se quiera advertir "hay más resultados,
-  refiná", iterar.
+- **Sin paginación en `/inventory`.** Límite duro de 100 resultados. Aceptable para MVP.
 
 ---
 
@@ -576,34 +413,22 @@ multi-sucursal. Ver sección 11.
 - **Nada de `any` en TypeScript** salvo justificación explícita.
 - **Validación con Zod** en fronteras (imports, API inputs, parsers).
 - **Imports honestos**: si un archivo no usa algo, no lo importa.
-- **Comentarios `///` (triple slash)** en Prisma para documentar modelos — aparecen en el cliente generado.
+- **Comentarios `///` (triple slash)** en Prisma para documentar modelos.
 - **Logs autodescriptivos**: nunca imprimir valores sueltos sin contexto.
 - **Nombres en camelCase**, sin typos, descriptivos.
 
 **De manejo de errores:**
 
-- **Funciones internas (library) lanzan `throw new Error(...)`.** Nunca
-  llaman a `process.exit`. Esto permite que el mismo código viva en
-  CLI y en Server Action sin matar el proceso de Next.
-- **Capa CLI externa** (típicamente `main().catch(...)`) es la única
-  que conoce de exit codes y llama a `process.exit(1)`. Es el contrato
-  con el shell/cron/wrapper.
-- **Catch intermedio** que necesita hacer limpieza (e.g. marcar un
-  ImportJob como FAILED) hace su trabajo y re-lanza con `throw error;`
-  para que la capa externa decida cómo terminar. Un catch que no
-  re-lanza oculta el error al mundo exterior.
+- **Funciones internas (library) lanzan `throw new Error(...)`.** Nunca llaman a `process.exit`. Esto permite que el mismo código viva en CLI y en Server Action sin matar el proceso de Next.
+- **Capa CLI externa** (típicamente `main().catch(...)`) es la única que conoce de exit codes y llama a `process.exit(1)`. Es el contrato con el shell/cron/wrapper.
+- **Catch intermedio** que necesita hacer limpieza (e.g. marcar un ImportJob como FAILED) hace su trabajo y re-lanza con `throw error;` para que la capa externa decida cómo terminar.
 
 **Arquitectónicos:**
 
-- **Snapshots son la verdad operacional.** El modelo de
-  `InventoryMovement` respeta los snapshots de existencias. Cuando un
-  movimiento puede registrarse contra distintas Branches (e.g. apartado
-  vía MARISOL), se elige la que mantiene los snapshots consistentes,
-  no necesariamente la que refleja la verdad física. Razón:
-  reconciliación `snapshot(t) + movements = snapshot(t+1)` debe
-  cuadrar; si no cuadra, todo Sentinel pierde credibilidad. La verdad
-  física se puede recuperar por otros caminos (diffs de snapshots
-  entre branches físicas y MARISOL).
+- **Snapshots son la verdad operacional.** El modelo de `InventoryMovement` respeta los snapshots de existencias. Cuando un movimiento puede registrarse contra distintas Branches, se elige la que mantiene los snapshots consistentes.
+- **`createdAt` ≠ fecha del evento.** El primero lo pone Prisma cuando se guarda el registro; el segundo es cuándo ocurrió la cosa en el mundo real. Modelar como campos separados en entidades con dimensión temporal (como movements).
+- **Verificar contra datos reales antes de cablear suposiciones.** El legacy es desmadre histórico — lo que el operador "sabe" no siempre matchea con lo que está en los archivos. Mirar el dato siempre vence a preguntar.
+- **Defensa explícita contra lo conocido, alarma ruidosa contra lo desconocido.** Sembrar branches conocidas inactivas si son potencialmente esperables (defensa); dejar que el parser explote con `throw` ante cualquier cosa no catalogada (alarma).
 
 ---
 
@@ -614,10 +439,6 @@ multi-sucursal. Ver sección 11.
 - `pnpm prisma studio` para inspeccionar DB visualmente (corre en localhost:5555 o similar).
 - `pnpm prisma db seed` corre `prisma/seed.ts`.
 - `pnpm tsx prisma/reset.ts` corre el script de reset (no hay comando Prisma built-in para esto).
-- **Exit codes en Windows CMD:** `echo %ERRORLEVEL%` (no `echo $?`,
-  que es sintaxis de bash). En PowerShell: `echo $LASTEXITCODE`.
-  Útil para verificar que scripts CLI propagan errores correctamente.
-- **Repo en GitHub:** https://github.com/CarlosAdrianLabra/sentinel (privado).
-  Remoto configurado como `origin`, rama `main`. Flujo: `git add . && git status && git commit -m "..." && git push`.
-  Convención de mensajes: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:` + scope opcional.
-  Pasar a público cuando el proyecto esté presentable (README para reclutadores).
+- **Exit codes en Windows CMD:** `echo %ERRORLEVEL%` (no `echo $?`, que es sintaxis de bash). En PowerShell: `echo $LASTEXITCODE`.
+- **Repo en GitHub:** https://github.com/CarlosAdrianLabra/sentinel (privado). Remoto configurado como `origin`, rama `main`. Flujo: `git add . && git status && git commit -m "..." && git push`. Convención de mensajes: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:` + scope opcional. Pasar a público cuando el proyecto esté presentable.
+- **Servidor del legacy es lento.** Reportes multi-sucursal pesados pueden tardar horas o tronar con "Cancelado por el usuario". Para diseño operativo de Sentinel, asumir que los exports son por sucursal o que los multi-sucursal son lentos. El reporte `Detalle de Ventas` es la excepción favorable (2-5 min multi-sucursal).

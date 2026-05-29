@@ -442,3 +442,133 @@ Jesus mencionó el 2026-05-28 que existe un reporte tipo "cardex" en el legacy. 
 - **Exit codes en Windows CMD:** `echo %ERRORLEVEL%` (no `echo $?`, que es sintaxis de bash). En PowerShell: `echo $LASTEXITCODE`.
 - **Repo en GitHub:** https://github.com/CarlosAdrianLabra/sentinel (privado). Remoto configurado como `origin`, rama `main`. Flujo: `git add . && git status && git commit -m "..." && git push`. Convención de mensajes: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:` + scope opcional. Pasar a público cuando el proyecto esté presentable.
 - **Servidor del legacy es lento.** Reportes multi-sucursal pesados pueden tardar horas o tronar con "Cancelado por el usuario". Para diseño operativo de Sentinel, asumir que los exports son por sucursal o que los multi-sucursal son lentos. El reporte `Detalle de Ventas` es la excepción favorable (2-5 min multi-sucursal).
+
+
+---
+
+## ACTUALIZACIÓN SESIÓN 2026-05-29
+
+### Archivo de existencias multi-sucursal: OBTENIDO Y VALIDADO
+
+`rptNewInvetarioGlobalSinVentaSENTINEL.xlsx` (Reporte de Existencias Por
+Criterio (GLOBAL), opción `Sucursal: --TODAS--`). Confirmado el reporte
+correcto del menú: `Reportes → Existencias → Por Criterio (Global)`.
+
+- Multi-sucursal real: bloques con varias filas SUC. por producto.
+- 20,571 pares, $6.5M importe, 4,594 productos. Snapshot 29/05/2026 12:02pm.
+- Integridad 100%: suma de filas de datos = suma de TOT = header (20571).
+- **Salió en ~10 minutos.** La lentitud de >3h del 2026-05-28 era contención
+  del servidor (Jesus u otros corriendo cosas en paralelo), no del reporte.
+  Conclusión operativa: el multi-sucursal de existencias ES viable, correr
+  en horas de baja carga.
+
+### Sucursales 3 y 9: VACÍAS, decisión sellada
+
+Conteo por sucursal en el snapshot:
+
+| Suc | Pares zapato | Pares no-zapato | Estado |
+|-----|-----|-----|-----|
+| 1 ABRYL | 9,870 | 731 | activa |
+| 2 TEZONCO | 5,382 | 1,301 | activa |
+| 3 LUIS REY | 0 | 0 | VACÍA |
+| 4 MIRASOL | 3 | 3 | apartados |
+| 5 ECOMM | 22 | 0 | activa |
+| 9 ABRIL | 0 | 0 | VACÍA |
+
+- Las sucursales 3 y 9 aparecen en TODOS los bloques pero siempre con CANT=0.
+  Los 485 SKUs de la 9 están todos también en la 1 (0 exclusivos) → el
+  reporte lista catálogo completo como placeholder, no inventario propio.
+- Contradice lo que dijo Jesus el 2026-05-28 ("la 9 tiene ropa"). El dato
+  manda: en este snapshot la 9 está en 0. Refuerza la lección: el dato vence
+  a la palabra del operador.
+- **El Reporte Ejecutivo de Ventas cubre los 29 días de mayo y SOLO aparecen
+  qualifiers 1, 1-M-, 2, 2-M-, 5.** Las sucursales 3, 4 y 9 NUNCA venden.
+  (La 4/MIRASOL no vende porque los apartados se cierran como venta de la
+  sucursal física, consistente con sección 8.3.)
+
+**DECISIÓN: sembrar las 6 sucursales, marcar 3 y 9 con isActive:false.**
+Razón: defensa contra el día que tengan stock (si el parser genera una tupla
+con branchLegacyId 3 o 9 y no está en branchMap, explota con "Sucursal
+desconocida" y aborta el import). Sembrarlas inactivas es barato y robusto.
+1, 2, 4, 5 activas; 3, 9 inactivas.
+
+**NO fusionar la 9 en la 1.** La intuición de Carlos (9 = misma tienda física
+que 1, razón social vieja) es razonable, pero fusionar en import rompe la
+reconciliación (el legacy siempre las separa) y es irreversible/lossy. Si
+algún día se confirma 9=1, sumar en query/vista (como MIRASOL), nunca en
+escritura. Diferido — hoy la 9 está vacía, no hay nada que fusionar.
+
+### Descubrimiento técnico: CANT=0 explícito en multi-sucursal
+
+El reporte multi-sucursal emite **CANT=0 explícito** en la columna CANT (col 3)
+para sucursales sin stock — CONTRADICE la sección 8.6, que documentaba (del
+archivo single-sucursal de Fase 8) que las filas SUC. nunca emiten 0, dejan
+vacío. Las columnas de TALLA sí siguen vacías cuando no hay stock.
+
+**No rompe el parser actual** porque genera tuplas solo cuando hay cantidad>0
+en una columna de talla; las filas con CANT=0 no tienen tallas pobladas, así
+que se ignoran solas. PERO es fragilidad latente: el día que 3 o 9 tengan
+stock real, el parser intentaría crear tuplas con branchLegacyId 3/9 → explota
+si no están sembradas. (De ahí la decisión de sembrar las 6.)
+
+### Mapa completo de fuentes de ventas del legacy
+
+| Reporte | Fecha | Suc | Producto | Talla | Tipo mov | Folio | Masivo |
+|---------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| Sumarizado (A) | no | no | sí | no | no | no | sí |
+| Corrida (B) | no | sí | sí | sí | no | no | NO (truena) |
+| Detalle (C) | no | sí | sí | sí | no | no | sí (diario rápido) |
+| Ejecutivo | sí/día | sí | no | no | no | no | sí |
+| Kardex por Talla | sí | sí | sí | sí | sí | sí | NO (1x1) |
+
+Ningún reporte masivo da las 4 dimensiones (fecha+suc+producto+talla) juntas.
+
+**Reporte Ejecutivo de Ventas** (`rptNewVentasEjecutivoDrill`): resumen diario
+por sucursal con toda la info financiera (costo, IVA, ganancia, notas de
+crédito, dif. en cambios, venta neta). Por FECHA (día) × sucursal qualifier.
+Sin producto/talla. Candidato a dashboard de ventas diarias. No esencial
+(derivable de movements si importamos Detalle diario).
+
+**Kardex por Talla** (`rptNewMovimientosTalla`): TRANSACCIONAL puro. Columnas
+FECHA | TIPO (ENTRADA/SALIDA) | MOVIMIENTO (VENTAS/ENTRADAS PEDIDOS/
+TRASPASOS (S)/etc.) | CANTIDAD | NO. OPERACION (folio único). Por
+artículo+talla+sucursal, UNO A LA VEZ. Inviable como import masivo (decenas
+de miles de archivos para todo el catálogo). **Queda como fuente de
+auditoría/drill-down puntual** ("historial completo de este SKU") — capacidad
+futura, no import. El NO. OPERACION daría idempotencia perfecta si algún día
+se usa. Confirmó que los traspasos existen como tipo de movimiento (apartados
+a MIRASOL = traspasos).
+
+El **Kardex Global** (`rptNewMovimientos`, sin "Talla") es intermedio: por
+producto, agrupa por fecha+tipo con cantidades por talla en columnas. Menos
+útil que el por-talla (no tiene NO. OPERACION ni tipo detallado).
+
+### DECISIÓN de arquitectura de ventas (Fase 11)
+
+- **Import masivo de ventas → Detalle de Ventas (C), exportado DIARIO.**
+  Confirmado 2026-05-29: el Detalle de UN DÍA sale rápido; el de una semana/mes
+  tarda muchísimo (mismo ahogo del servidor que Corrida). El límite técnico y
+  el diseño correcto coinciden: queremos diario igual (fecha exacta del
+  movement sin inventar convención de rango).
+- **Convención operativa: un Detalle de Ventas por día, importado diario.**
+  Cada archivo = un día = una fecha de movement. Resuelve el pendiente de
+  "fecha del movement" — ya no hay que elegir Fecha Final del rango.
+- Kardex por Talla = drill-down futuro. Ejecutivo = dashboard opcional.
+
+### Pendientes para próxima sesión (a codear)
+
+1. Sembrar las 6 sucursales en `lib/constants/branches.ts` + seed (3 y 9 con
+   isActive:false). Corrección de MARISOL→MIRASOL en el code/name.
+2. Refactor del parser de existencias para formato multi-sucursal real:
+   varias filas SUC. por bloque, manejar CANT=0 explícito.
+3. Empezar parser de ventas sobre Detalle de Ventas (C), reusando lógica del
+   de existencias. Idempotencia opción 3 (ver sección 10).
+
+### Notas operativas nuevas
+
+- Reporte de existencias multi-sucursal correcto: menú `Reportes → Existencias
+  → Por Criterio (Global)`, filtro `Sucursal: --TODAS--`. Tarda ~10 min en
+  servidor descargado, horas si está bajo contención.
+- Reportes pesados multi-sucursal con rango largo (Corrida, Detalle de semana/
+  mes) tienden a ahogar el servidor. Preferir siempre el rango más corto
+  posible (diario para ventas).

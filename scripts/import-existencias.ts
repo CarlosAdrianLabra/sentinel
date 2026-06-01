@@ -109,7 +109,7 @@ function parseProducts(rows: unknown[][]): InventoryTuple[] {
 
           const num = Number(trimmed);
           if (isNaN(num)) continue;
-          if (num < 500 || num > 4000) continue;
+          if (num < 500 || num > 4500) continue;
 
           const tallaReal = num / 100;
           sizeByColumn[col] = tallaReal.toFixed(1);

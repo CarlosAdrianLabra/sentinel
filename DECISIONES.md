@@ -402,6 +402,16 @@ Jesus mencionó el 2026-05-28 que existe un reporte tipo "cardex" en el legacy. 
 
 - **Sin paginación en `/inventory`.** Límite duro de 100 resultados. Aceptable para MVP.
 
+- **Columnas huérfanas en existencias multi-sucursal (deuda C, 2026-06-01).**
+  16 pares en 8 productos zapato se pierden porque una fila de datos trae
+  stock en una columna que el header SUC. no etiquetó (dos sucursales con
+  rangos de talla distintos comparten un header que no cubre la unión).
+  Ej. DECHRIS-210: header llega a col 16 (talla 26.0), pero la fila de suc 1
+  tiene 1 par en col 17 sin etiqueta de talla. Resolverlo exige inferir la
+  talla de una columna sin header (arriesgado: podría meter datos mal en las
+  18,500 buenas). Decisión: NO se arregla. 16 pares (0.08%) de ruido legacy
+  no justifican lógica de inferencia. Registrado como conocido.
+
 ---
 
 ## 12. Principios de código y diseño acordados
@@ -581,3 +591,75 @@ producto, agrupa por fecha+tipo con cantidades por talla en columnas. Menos
 - Reportes pesados multi-sucursal con rango largo (Corrida, Detalle de semana/
   mes) tienden a ahogar el servidor. Preferir siempre el rango más corto
   posible (diario para ventas).
+
+---
+
+## ACTUALIZACIÓN SESIÓN 2026-06-01
+
+### Sembrado de las 6 sucursales (pendiente #1: cerrado)
+
+`lib/constants/branches.ts` extendido a 6 entradas. MARISOL→MIRASOL
+corregido. Sucursales muertas 3 (Luis Rey) y 9 (Abril) sembradas con
+`isActive: false` (defensa: si algún día traen stock, el branchMap ya
+las tiene y el parser no explota con "Sucursal desconocida").
+
+- `code`/`name` de las muertas: cortos y estables (`LUISREY`/`Luis Rey`,
+  `ABRIL`/`Abril`). El nombre legal largo de la 9 ("TIENDAS DE ROPA Y
+  CALZADO ABRIL S.A. DE C.V.") vive en `legacyStoreName`, NO en `code`.
+- `code: "ABRIL"` no choca con `ABRYL` (suc 1) — son strings distintos.
+- Fix del seed: el upsert keyeaba por `code`, que es justo la columna que
+  se renombra (MARISOL→MIRASOL). Cambiado a keyear por `legacyStoreId`
+  (estable) y se agregó `code` + `isActive` al update/create. Verificado
+  en Studio: 6 filas, legacyStoreId=4 ahora code=MIRASOL (no se duplicó),
+  muertas con isActive=0.
+
+### Parser de existencias verificado en multi-sucursal (pendiente #2)
+
+El #2 no resultó ser un refactor: el parser de Fase 8 **ya soporta
+multi-sucursal sin cambios estructurales**. Verificado corriendo el
+parser real sobre `rptNewInvetarioGlobalSinVentaSENTINEL.xlsx`
+(ImportJob 18 COMPLETED):
+
+- Captura **18,517 pares = 99.88% del zapato** (18,540 reales de zapato).
+- Maneja bien bloques con varias filas SUC. por producto y productos
+  partidos en varios sub-grupos SUC./TOT. (cuando el rango de tallas no
+  cabe en una fila).
+- **CANT=0 explícito NO rompe el parser**: genera cero tuplas (confirma
+  predicción del 2026-05-29). Solo infla el contador `positionCount` del
+  log (cosmético).
+- **Sucursales 3 y 9 aparecen en filas de datos** (siempre CANT=0 en este
+  snapshot). El branchMap las tiene por el sembrado → no explota. La
+  fragilidad latente registrada el 2026-05-29 quedó mitigada.
+
+Faltante vs header (20,571 − 18,517 = 2,054), descompuesto:
+
+- **2,031 pares** = productos no-zapato (talla categórica). Ignorados a
+  propósito — es la deuda diferida de Fase 8, no algo nuevo.
+- **23 pares** = edge cases legacy en productos zapato (ver abajo).
+
+### Tope de talla 4000 → 4500 (B aplicado)
+
+`parseProducts` filtraba columnas de talla con `num > 4000` (= talla
+40.0). Caballero tiene tallas 42/44 (4200/4400) con stock real que se
+descartaba. Subido el tope a 4500 (deja pasar hasta talla 45.0, excluye
+apparel que usa "tallas" 60/80 = 6000/8000).
+
+- Verificado (ImportJob 19): suma 18,517 → 18,521 (+4 pares), tuplas
+  9,658 → 9,660 (+2 posiciones: tallas 42 y 44 de un caballero TEZONCO).
+- **Idempotencia confirmada empíricamente**: ImportJob 19 corrió el mismo
+  archivo que el 18 y generó SOLO 2 movements (referenceId="19", las 2
+  posiciones nuevas con delta≠0). Las otras 9,658 tuplas dieron delta=0
+  contra lo ya escrito → cero movements. ImportJob crece (auditoría),
+  InventoryMovement solo registra el cambio real.
+
+### Hallazgos menores (deuda chica)
+
+- **Log "Productos/posiciones/movements creados: N" miente.** N es
+  `processedCount`, que cuenta tuplas procesadas (incrementa una vez por
+  tupla, pase o no por el `if (delta !== 0)`), NO movements creados.
+  Viola el principio de logs autodescriptivos. Renombrar a "tuplas
+  procesadas" o contar movements de verdad. Diferido.
+- **`snapshotDate` se ve desplazado en Studio.** El header dice 12:02 p.m.;
+  date-fns parsea en hora local (CDMX, UTC−6) y Studio muestra en UTC →
+  18:02. El valor guardado es correcto, solo la vista desfasa. Tenerlo
+  presente al renderizar fechas en la UI.

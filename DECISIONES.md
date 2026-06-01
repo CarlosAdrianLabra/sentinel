@@ -155,14 +155,14 @@ sentinel/
 
 **Catálogo completo verificado con Jesus el 2026-05-28** (captura del dropdown de selección de sucursal del legacy):
 
-| ID legacy | Nombre en INVENSHOES                              | Code operativo | Nombre operativo | Estado en Sentinel |
-| --------- | ------------------------------------------------- | -------------- | ---------------- | ------------------ |
-| `"1"`     | ADRIAN GRANADOS DEL LLANO                         | `ABRYL`        | Abryl            | activa, física     |
-| `"2"`     | CARLOS DEL LLANO ROBLES                           | `TEZONCO`      | Tezonco          | activa, física     |
-| `"3"`     | LUIS REY                                          | —              | —                | muerta, NO se siembra |
-| `"4"`     | MIRASOL                                           | `MIRASOL`      | Mirasol          | virtual (apartados) |
-| `"5"`     | SPORT TENIS                                       | `ECOMM`        | e-commerce       | virtual (canal externo) |
-| `"9"`     | TIENDAS DE ROPA Y CALZADO ABRIL S.A. DE C.V.      | —              | —                | TBD según archivo de existencias multi-sucursal |
+| ID legacy | Nombre en INVENSHOES                         | Code operativo | Nombre operativo | Estado en Sentinel                              |
+| --------- | -------------------------------------------- | -------------- | ---------------- | ----------------------------------------------- |
+| `"1"`     | ADRIAN GRANADOS DEL LLANO                    | `ABRYL`        | Abryl            | activa, física                                  |
+| `"2"`     | CARLOS DEL LLANO ROBLES                      | `TEZONCO`      | Tezonco          | activa, física                                  |
+| `"3"`     | LUIS REY                                     | —              | —                | muerta, NO se siembra                           |
+| `"4"`     | MIRASOL                                      | `MIRASOL`      | Mirasol          | virtual (apartados)                             |
+| `"5"`     | SPORT TENIS                                  | `ECOMM`        | e-commerce       | virtual (canal externo)                         |
+| `"9"`     | TIENDAS DE ROPA Y CALZADO ABRIL S.A. DE C.V. | —              | —                | TBD según archivo de existencias multi-sucursal |
 
 Las sucursales activas viven en `lib/constants/branches.ts` como constante y se siembran con `prisma/seed.ts`.
 
@@ -260,14 +260,14 @@ Observado en rptNewVentasDetalle.xlsx (ECOMM single-sucursal) y **rptNewVentasDe
 
 Catálogo completo verificado en rptNewVentasDetallegeneral.xlsx (2026-05-28, sample multi-sucursal de 113 filas):
 
-| Qualifier | Branch destino | Comentario |
-|-----------|---------------|-----|
-| `1`       | ABRYL (1)     | poco frecuente (5 de 113 filas) |
-| `1-M-`    | ABRYL (1)     | el caso común (57 de 113) |
-| `2`       | TEZONCO (2)   | poco frecuente (1 de 113) |
-| `2-M-`    | TEZONCO (2)   | el caso común (26 de 113) |
-| `5`       | ECOMM (5)     | único qualifier para ECOMM (24 de 113), sin variante `-M-` |
-| `4` o `4-M-` | **No existe** | MIRASOL nunca aparece en ventas |
+| Qualifier    | Branch destino | Comentario                                                 |
+| ------------ | -------------- | ---------------------------------------------------------- |
+| `1`          | ABRYL (1)      | poco frecuente (5 de 113 filas)                            |
+| `1-M-`       | ABRYL (1)      | el caso común (57 de 113)                                  |
+| `2`          | TEZONCO (2)    | poco frecuente (1 de 113)                                  |
+| `2-M-`       | TEZONCO (2)    | el caso común (26 de 113)                                  |
+| `5`          | ECOMM (5)      | único qualifier para ECOMM (24 de 113), sin variante `-M-` |
+| `4` o `4-M-` | **No existe**  | MIRASOL nunca aparece en ventas                            |
 
 **Interpretación del sufijo `-M-`:** Jesus dice que es para distinguir "turno mañana vs tarde" o quizás "tarjeta vs efectivo" (su explicación fue tentativa). Los datos no cuadran con la interpretación literal de turno — un día normal a las 2 PM tiene 17 ventas `1-M-` vs 1 sola `1`. **Para Sentinel esto no importa**: ambos qualifiers van al mismo branch físico operativo. El parser **descarta el sufijo** al normalizar.
 
@@ -416,6 +416,16 @@ Jesus mencionó el 2026-05-28 que existe un reporte tipo "cardex" en el legacy. 
 - **Comentarios `///` (triple slash)** en Prisma para documentar modelos.
 - **Logs autodescriptivos**: nunca imprimir valores sueltos sin contexto.
 - **Nombres en camelCase**, sin typos, descriptivos.
+- **Upsert nunca se keyea por la columna que se va a mutar.** El `where`
+  de un upsert debe apuntar a una llave estable (en Branch:
+  `legacyStoreId`, el ID de INVENSHOES que nunca cambia), no a un campo
+  que el propio upsert modifica (como `code`). Si se keyea por la columna
+  mutada, el `where` no encuentra la fila vieja, cae al `create`, y choca
+  contra otra constraint `@unique` (o crea un duplicado huérfano).
+  Descubierto al corregir MARISOL→MIRASOL en el seed (2026-06-01): keyear
+  por `code` habría dejado MARISOL viva + MIRASOL nueva = 7 filas en vez
+  de 6. Aplica a cualquier upsert futuro (ej. ImportJob: keyear por algo
+  inmutable, no por un status que va a cambiar).
 
 **De manejo de errores:**
 
@@ -443,7 +453,6 @@ Jesus mencionó el 2026-05-28 que existe un reporte tipo "cardex" en el legacy. 
 - **Repo en GitHub:** https://github.com/CarlosAdrianLabra/sentinel (privado). Remoto configurado como `origin`, rama `main`. Flujo: `git add . && git status && git commit -m "..." && git push`. Convención de mensajes: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:` + scope opcional. Pasar a público cuando el proyecto esté presentable.
 - **Servidor del legacy es lento.** Reportes multi-sucursal pesados pueden tardar horas o tronar con "Cancelado por el usuario". Para diseño operativo de Sentinel, asumir que los exports son por sucursal o que los multi-sucursal son lentos. El reporte `Detalle de Ventas` es la excepción favorable (2-5 min multi-sucursal).
 
-
 ---
 
 ## ACTUALIZACIÓN SESIÓN 2026-05-29
@@ -466,14 +475,14 @@ correcto del menú: `Reportes → Existencias → Por Criterio (Global)`.
 
 Conteo por sucursal en el snapshot:
 
-| Suc | Pares zapato | Pares no-zapato | Estado |
-|-----|-----|-----|-----|
-| 1 ABRYL | 9,870 | 731 | activa |
-| 2 TEZONCO | 5,382 | 1,301 | activa |
-| 3 LUIS REY | 0 | 0 | VACÍA |
-| 4 MIRASOL | 3 | 3 | apartados |
-| 5 ECOMM | 22 | 0 | activa |
-| 9 ABRIL | 0 | 0 | VACÍA |
+| Suc        | Pares zapato | Pares no-zapato | Estado    |
+| ---------- | ------------ | --------------- | --------- |
+| 1 ABRYL    | 9,870        | 731             | activa    |
+| 2 TEZONCO  | 5,382        | 1,301           | activa    |
+| 3 LUIS REY | 0            | 0               | VACÍA     |
+| 4 MIRASOL  | 3            | 3               | apartados |
+| 5 ECOMM    | 22           | 0               | activa    |
+| 9 ABRIL    | 0            | 0               | VACÍA     |
 
 - Las sucursales 3 y 9 aparecen en TODOS los bloques pero siempre con CANT=0.
   Los 485 SKUs de la 9 están todos también en la 1 (0 exclusivos) → el
@@ -513,13 +522,13 @@ si no están sembradas. (De ahí la decisión de sembrar las 6.)
 
 ### Mapa completo de fuentes de ventas del legacy
 
-| Reporte | Fecha | Suc | Producto | Talla | Tipo mov | Folio | Masivo |
-|---------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| Sumarizado (A) | no | no | sí | no | no | no | sí |
-| Corrida (B) | no | sí | sí | sí | no | no | NO (truena) |
-| Detalle (C) | no | sí | sí | sí | no | no | sí (diario rápido) |
-| Ejecutivo | sí/día | sí | no | no | no | no | sí |
-| Kardex por Talla | sí | sí | sí | sí | sí | sí | NO (1x1) |
+| Reporte          | Fecha  | Suc | Producto | Talla | Tipo mov | Folio |       Masivo       |
+| ---------------- | :----: | :-: | :------: | :---: | :------: | :---: | :----------------: |
+| Sumarizado (A)   |   no   | no  |    sí    |  no   |    no    |  no   |         sí         |
+| Corrida (B)      |   no   | sí  |    sí    |  sí   |    no    |  no   |    NO (truena)     |
+| Detalle (C)      |   no   | sí  |    sí    |  sí   |    no    |  no   | sí (diario rápido) |
+| Ejecutivo        | sí/día | sí  |    no    |  no   |    no    |  no   |         sí         |
+| Kardex por Talla |   sí   | sí  |    sí    |  sí   |    sí    |  sí   |      NO (1x1)      |
 
 Ningún reporte masivo da las 4 dimensiones (fecha+suc+producto+talla) juntas.
 
@@ -567,7 +576,7 @@ producto, agrupa por fecha+tipo con cantidades por talla en columnas. Menos
 ### Notas operativas nuevas
 
 - Reporte de existencias multi-sucursal correcto: menú `Reportes → Existencias
-  → Por Criterio (Global)`, filtro `Sucursal: --TODAS--`. Tarda ~10 min en
+→ Por Criterio (Global)`, filtro `Sucursal: --TODAS--`. Tarda ~10 min en
   servidor descargado, horas si está bajo contención.
 - Reportes pesados multi-sucursal con rango largo (Corrida, Detalle de semana/
   mes) tienden a ahogar el servidor. Preferir siempre el rango más corto

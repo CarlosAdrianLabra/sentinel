@@ -1,8 +1,9 @@
 type BranchSeed = {
-  code: "ABRYL" | "TEZONCO" | "ECOMM" | "MARISOL";
+  code: "ABRYL" | "TEZONCO" | "ECOMM" | "MIRASOL" | "LUISREY" | "ABRIL";
   name: string;
   legacyStoreId: string;
   legacyStoreName: string;
+  isActive?: boolean; // omitido = activa (true); solo las muertas lo ponen en false
 };
 
 export const BRANCHES: ReadonlyArray<BranchSeed> = [
@@ -25,9 +26,23 @@ export const BRANCHES: ReadonlyArray<BranchSeed> = [
     legacyStoreName: "Sport Tenis",
   },
   {
-    code: "MARISOL",
-    name: "Marisol",
+    code: "MIRASOL",
+    name: "Mirasol",
     legacyStoreId: "4",
-    legacyStoreName: "Marisol",
+    legacyStoreName: "Mirasol",
+  },
+  {
+    code: "LUISREY",
+    name: "Luis Rey",
+    legacyStoreId: "3",
+    legacyStoreName: "Luis Rey",
+    isActive: false,
+  },
+  {
+    code: "ABRIL",
+    name: "Abril",
+    legacyStoreId: "9",
+    legacyStoreName: "Tiendas De Ropa Y Calzado Abril S.A. De C.V.",
+    isActive: false,
   },
 ];

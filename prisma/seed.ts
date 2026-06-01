@@ -15,20 +15,24 @@ async function main() {
   console.log("🌱 Starting seed...");
   for (const branch of BRANCHES) {
     await prisma.branch.upsert({
-      where: { code: branch.code },
+      where: { legacyStoreId: branch.legacyStoreId },
       update: {
+        code: branch.code,
         name: branch.name,
-        legacyStoreId: branch.legacyStoreId,
         legacyStoreName: branch.legacyStoreName,
+        isActive: branch.isActive ?? true,
       },
       create: {
         code: branch.code,
         name: branch.name,
         legacyStoreId: branch.legacyStoreId,
         legacyStoreName: branch.legacyStoreName,
+        isActive: branch.isActive ?? true,
       },
     });
-    console.log(`Branch ${branch.code} ready`);
+    console.log(
+      `Branch ${branch.code} ready (active: ${branch.isActive ?? true})`,
+    );
   }
 
   console.log("🎉 Seed completed");

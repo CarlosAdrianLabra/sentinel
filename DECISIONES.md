@@ -663,3 +663,101 @@ apparel que usa "tallas" 60/80 = 6000/8000).
   date-fns parsea en hora local (CDMX, UTC−6) y Studio muestra en UTC →
   18:02. El valor guardado es correcto, solo la vista desfasa. Tenerlo
   presente al renderizar fechas en la UI.
+
+---
+
+## ACTUALIZACIÓN SESIÓN 2026-06-02
+
+### Schema: campo movementDate en InventoryMovement
+
+Migración `add_movement_date` aplicada. Campo `movementDate DateTime?`
+(opcional) en `InventoryMovement`.
+
+- **Por qué opcional:** modela que solo ALGUNOS movements tienen fecha de
+  evento real. Ventas (`OUT`) sí (cuándo se vendió). Existencias
+  (`IMPORT_SET`) no (un ajuste a snapshot no ocurrió un día concreto; su
+  tiempo es el del import). Opcional permite NULL para los ~9,660 movements
+  de existencias ya existentes sin romper la migración.
+- **Opcional en DB ≠ opcional en el parser.** El parser de ventas exige
+  movementDate siempre (vía Zod). La tabla permite null; el código de
+  ventas no.
+- Aplica el principio (sección 12): `createdAt` (cuándo se guardó) ≠ fecha
+  del evento (cuándo ocurrió en el mundo real).
+
+### Diseño del parser de ventas (pendiente #3) — DISEÑO CERRADO, código a medias
+
+Archivo nuevo: `scripts/import-ventas.ts` (separado de existencias, no un
+`if` adentro — cada parser escribe distinto).
+
+**Decisión central — ventas escribe SOLO en InventoryMovement, NO toca
+InventoryPosition.**
+
+- Ventas = la película (eventos `OUT` con fecha). Existencias = la foto
+  (estado en `InventoryPosition`). Cada parser dueño de su tabla.
+- El legacy ya descuenta el stock solo, así que el próximo snapshot de
+  existencias ya trae la posición correcta. Si ventas también bajara la
+  posición, el snapshot siguiente aplicaría el descuento dos veces →
+  posición rota. Por eso ventas se mantiene lejos de InventoryPosition.
+- Cada venta de talla con cantidad>0 → movement `OUT`, `quantityDelta`
+  negativo, sin `findUnique`/delta (una venta ES el movimiento, no se
+  deduce comparando contra stock previo).
+
+**Por qué importar ventas si el snapshot ya da el stock:** el snapshot no
+cuenta CÓMO se llegó de un stock a otro. Ventas da rotación (qué se mueve y
+a qué ritmo) y fecha de evento (tendencias, dashboard diario). Es el
+historial de movimientos consultable que el legacy no expone masivamente
+(sección 1: "no hay forma clara de auditar cambios").
+
+**Formato C verificado contra rptNewVentasDetallegeneral.xlsx:**
+
+- Hoja de datos: `rptNewVentasDetalle`. Header con `Fecha Inicial` y
+  `Fecha Final` (en el sample, ambas = 27/05/2026 = un día, convención
+  diaria confirmada).
+- Etiquetas (producto, SUC., qualifier, TOT.) en **col 0** (en existencias
+  era col 1).
+- Columnas financieras en 2-27 (CANT col 2, COSTO/U 4, PRECIO/U 5, TOTAL
+  22, UTILIDAD 23, ROTACION 27...). **Tallas arrancan en col 29.**
+- Cantidad vendida por talla en las columnas de talla (29+), igual modelo
+  que existencias (header de tallas en centésimas, varía por producto).
+
+**Constantes de layout decididas:**
+`LABEL_COL = 0`, `SIZE_SCAN_START = 29`, `SIZE_SCAN_END = 50` (margen;
+sample llega a ~42), filtro talla `[500, 4500]` (igual que existencias).
+Arrancar el scan en 29 (no en 4 como existencias) es defensa por
+construcción: nunca mira las columnas financieras, que tienen números en
+rango [500,4500] (ej. COSTO/U 574.5) que podrían colarse como tallas.
+
+**`normalizeQualifier(raw): string` — HECHA Y VERIFICADA.**
+`raw.replace(/[^0-9]/g,"")` colapsa el sufijo `-M-`, luego valida contra
+`["1","2","5"]`. `4` (MIRASOL) y desconocidos → throw con mensaje
+autodescriptivo. Verificada: `"1-M-"`→`"1"`, `"5"`→`"5"`, `"2-M-"`→`"2"`,
+`"4"`→throw, `"7"`→throw.
+
+**`SaleTuple` decidida:** `branchLegacyId` (string, ya normalizado),
+`fullDescription`, `size`, `quantity` (`.positive()`, no nonnegative — una
+venta de 0 no es venta), `movementDate` (Date, el campo nuevo). SIN
+`isActive`: un movement no tiene ese campo, y ventas no debe gobernar el
+`isActive` del Product (eso es trabajo de existencias).
+
+**Loop con 4 ramas (esqueleto armado, ramas a llenar):**
+
+1. ¿producto nuevo? (col 0, ≥4 guiones) → arranca bloque.
+2. `SUC.` → leer header de tallas, armar sizeByColumn (idéntico a
+   existencias salvo rango de scan). [TODO]
+3. fila de datos (col 0 tiene dígito, `/\d/.test()`) → normalizeQualifier +
+   leer cantidades por talla → push tuplas. [TODO]
+4. `TOT.` → fin de bloque / validación opcional.
+
+`parseSales(rows, movementDate)` recibe la fecha como parámetro (leída una
+vez del header) y la clava en cada tupla.
+
+### Pendiente para próxima sesión (#3, a construir)
+
+- Llenar ramas 2 y 3 del loop.
+- Lectura del header: extraer `Fecha Final` y parsear con date-fns (cuidado
+  con el formato y la zona horaria, ver hallazgo TZ del 2026-06-01).
+- Persistencia: upsert Product, crear movement `OUT` con quantityDelta
+  negativo + movementDate, source `legacy_sales`. NO tocar
+  InventoryPosition.
+- Idempotencia opción 3 (sección 10): rechazo si ya existe ImportJob
+  COMPLETED con mismo source+fecha. Mecanismo de override: TBD.

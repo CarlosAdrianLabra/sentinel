@@ -761,3 +761,76 @@ vez del header) y la clava en cada tupla.
   InventoryPosition.
 - Idempotencia opción 3 (sección 10): rechazo si ya existe ImportJob
   COMPLETED con mismo source+fecha. Mecanismo de override: TBD.
+
+---
+
+## ACTUALIZACIÓN SESIÓN 2026-06-03
+
+### Parser de ventas (pendiente #3) — COMPLETO, falta correr import real
+
+`scripts/import-ventas.ts` terminado y compilando. Lectura verificada
+contra el archivo real (rptNewVentasDetallegeneral.xlsx) replicando la
+lógica en Python: 102 tuplas, 102 pares, Fecha Final 27/05/2026, qualifiers
+idénticos a la tabla 8.3 (`1`:5, `1-M-`:57, `2`:1, `2-M-`:26, `5`:24),
+cero errores de normalización.
+
+**Estructura (reusa el molde de existencias, difiere donde importa):**
+
+- `normalizeQualifier(raw)`: limpia con `replace(/[^0-9]/g,"")` (colapsa
+  el sufijo `-M-`), valida contra `["1","2","5"]`. `4` y desconocidos →
+  throw. Verificada.
+- `parseSales(rows, movementDate)`: loop de 4 ramas. Diferencias clave con
+  existencias:
+  - Etiquetas en col 0 (no col 1). Constante `LABEL_COL`.
+  - Tallas escanean de col 29 a 50 (`SIZE_SCAN_START`/`END`). Arrancar en
+    29 evita las columnas financieras (COSTO/U, PRECIO/U, etc.) que tienen
+    números en rango [500,4500] y se colarían como tallas.
+  - Fila de datos se detecta por "col 0 tiene dígito" (`/\d/.test`), no por
+    `typeof === number` como existencias (acá el qualifier es string).
+- `extractFechaFinalString` + `parseFechaFinal`: leen `Fecha Final` del
+  header (busca la celda en cualquier columna con `.find`, no posición
+  fija) y la parsean con `dd/MM/yyyy`. Si no hay fecha → throw (sin fecha,
+  un movement de venta no tiene sentido).
+
+**Persistencia — `persistSales`. Decisión central confirmada:**
+
+- Ventas escribe SOLO `InventoryMovement`, NUNCA `InventoryPosition`.
+- De las 4 operaciones de `persistTuples` (existencias), sobreviven 2:
+  upsert Product + create movement. Se borran: leer posición previa y
+  upsert posición (no hay delta que calcular; una venta ES el movimiento).
+- Movement: `movementType "OUT"`, `quantityDelta = -tuple.quantity`
+  (negativo, sale stock), con `movementDate`. Se crea SIEMPRE (toda tupla
+  ya pasó el filtro quantity>0; no hay `if delta!=0`).
+- Upsert Product: `update: {}` (no toca nada si existe — ventas no
+  gobierna el Product), `create` solo con `fullDescription` (isActive cae
+  a true por @default). fullDescription se limpia el `" *"` igual que
+  existencias, para que matchee el mismo Product.
+
+**Idempotencia (opción 3) — implementada:**
+
+- Antes de crear el ImportJob, `findFirst` busca un ImportJob `legacy_sales`
+  COMPLETED con el mismo `snapshotDate`. Si existe → throw, aborta sin
+  duplicar.
+- Va ANTES de createImportJob (si no, la query se encontraría a sí misma).
+- Necesaria porque ventas NO tiene la red de idempotencia de existencias
+  (allá delta=0 → no movement; acá cada corrida crea OUTs nuevos sin
+  comparar, así que correr el mismo archivo 2x duplicaría las ventas).
+
+### Deuda chica nueva
+
+- **`snapshotDate` reusado para fecha de venta.** El campo se llama
+  `snapshotDate` (nombre de existencias), pero en ventas guarda la Fecha
+  Final del archivo. Funciona, pero el nombre miente un poco. Si algún día
+  molesta, renombrar a algo neutro tipo `sourceDate`. Diferido.
+
+### Pendiente para próxima sesión
+
+- **Correr el import de ventas real** (`pnpm tsx scripts/import-ventas.ts
+rptNewVentasDetallegeneral.xlsx`) con predicción previa: cuántos movements,
+  qué movementType, y qué pasa en una segunda corrida (idempotencia).
+- Verificar en Studio: ImportJob COMPLETED, movements OUT con quantityDelta
+  negativo y movementDate, que NO se hayan tocado posiciones.
+- Probar idempotencia: segunda corrida del mismo archivo → debe abortar con
+  el error de duplicado.
+- TODO opcional en RAMA 4 (validación de TOT) sigue sin hacer — decidir si
+  vale o se deja.

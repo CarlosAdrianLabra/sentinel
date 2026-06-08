@@ -834,3 +834,56 @@ rptNewVentasDetallegeneral.xlsx`) con predicción previa: cuántos movements,
   el error de duplicado.
 - TODO opcional en RAMA 4 (validación de TOT) sigue sin hacer — decidir si
   vale o se deja.
+
+---
+
+## ACTUALIZACIÓN SESIÓN 2026-06-08
+
+### Import de ventas: CORRIDO Y VERIFICADO — pendiente #3 cerrado
+
+Primer import de ventas real ejecutado y verificado en DB. Fase 11 completa.
+
+`pnpm tsx scripts/import-ventas.ts rptNewVentasDetallegeneral.xlsx`
+→ ImportJob 20, COMPLETED, 102 movements, fecha 27/05/2026.
+
+Verificado en Studio (referenceId="20"):
+
+- **102 movements `OUT`**, todos `quantityDelta = -1` (negativo, sale
+  stock), `movementDate = 2026-05-27`, `referenceId = 20`. Coincide con la
+  lectura (102 tuplas) y con la predicción.
+- branchId 7/8/9 (= ABRYL/TEZONCO/ECOMM, las que venden). Ninguna 13/18/19
+  (MIRASOL/LUISREY/ABRIL) — correcto, no venden.
+- `InventoryPosition` NO se tocó (decisión central: ventas solo escribe
+  movements). Conviven 102 OUT con los ~9,660 IMPORT_SET de existencias en
+  la misma tabla — historial completo, correcto.
+
+**Idempotencia (opción 3) PROBADA empíricamente:**
+
+- Segunda corrida del mismo archivo → abortó con
+  "Ya existe un import de ventas COMPLETED para 27/05/2026 (ImportJob 20)".
+- NO creó movements (total OUT del 27/05 sigue en 102, no 204), NO creó
+  ImportJob nuevo (throw antes de createImportJob).
+- El catch entró en la rama "antes de crear el ImportJob" (importJobId
+  undefined → no marca FAILED), la capa CLI hizo exit 1. Patrón de errores
+  en capas (sección 12) funcionando.
+
+### Desfase de hora en movementDate (esperado, no bug)
+
+`27/05/2026` se guarda como `2026-05-27T06:00:00.000Z`. parseFechaFinal
+parsea como medianoche LOCAL (CDMX, UTC−6); medianoche local = 06:00 UTC.
+El día es correcto. Mismo fenómeno TZ que snapshotDate en existencias.
+IMPORTANTE para idempotencia: mientras siempre se parsee igual, el valor es
+idéntico y el findFirst matchea. (Verificado: la 2da corrida matcheó.)
+
+### Pendientes (próxima sesión / futuro)
+
+- TODO opcional RAMA 4 (validación de suma contra TOT en ventas) — nunca se
+  hizo. Decidir si vale o se descarta como en existencias.
+- Deuda chica viva: log "movements creados" en existencias (cuenta tuplas);
+  snapshotDate reusado para fecha de venta (nombre); columnas huérfanas
+  (deuda C); process.exit→throw ya resuelto.
+- UI pendiente: vista de ventas, importer de ventas con botón, columna de
+  rotación en /inventory (ahora que hay movimientos de venta, ya hay datos
+  para calcularla).
+- Operativo: convención de Detalle de Ventas diario con Jesus; validador
+  "archivo no regresivo".

@@ -1042,3 +1042,73 @@ Del bloque de candidatos del 2026-06-08 queda cerrado **UI de ventas**. Siguen a
   tuplas, no movements); `snapshotDate` reusado para fecha de venta (nombre); columnas
   huérfanas (deuda C).
 - Operativo: convención de Detalle de Ventas diario con Jesus.
+
+## ACTUALIZACIÓN SESIÓN 2026-06-09 (cont. — warm-ups)
+
+Dos warm-ups chicos para cerrar la sesión, ambos sobre la vista de ventas recién
+construida. Commits separados por capa:
+
+- `feat(sales): segundo y tercer criterio de orden en la vista de ventas` (`0069f8d`)
+- `chore(sales): descarta validación de TOT en el parser con justificación` (`f72aacf`)
+
+### Orden de `/sales` ampliado a tres criterios
+
+`orderBy` pasó de un objeto (`{ movementDate: "desc" }`) a un array de tres, igual que
+`/inventory`:
+
+```typescript
+orderBy: [
+  { movementDate: "desc" }, // eje del log, más nuevo arriba
+  { branchId: "asc" }, // agrupa por sucursal
+  { quantityDelta: "asc" }, // ventas más grandes arriba (ver nota de signo)
+];
+```
+
+**Signo de `quantityDelta` en el orden (aprendizaje).** La intención "ventas más grandes
+arriba" se escribe `asc`, **no** `desc`, porque la columna guarda el delta **negativo**
+(`-2 < -1`): ascendente pone el más negativo (la venta de 2 pares) primero. Hay que leerlo
+en voz alta —"ordeno `quantityDelta` de menor a mayor, y como es negativo, la venta más
+grande sale primero"— para no equivocar la dirección. Ojo: se ordena por `quantityDelta`
+(columna cruda, en SQL), NO por `cantidad` (la llave aplanada, que solo existe en JS
+_después_ del `.map`). El `orderBy` corre dentro de la query, antes del aplanado; intentar
+ordenar por `sucursal`/`cantidad` lo rechaza TS — buen recordatorio de dónde pasa cada cosa.
+
+**DEUDA CHICA aceptada a propósito — orden de sucursal atado a `branchId`.**
+`branchId: "asc"` da ids 7,8,9 → Abryl, Tezonco, e-commerce, que casualmente es el orden
+deseado (físicas primero, canal después). PERO funciona por **coincidencia del orden de
+siembra del seed**, no porque `branchId` signifique "prioridad de negocio" (significa orden
+de inserción). Si algún día se resiembra distinto o se agrega una sucursal, el orden cambia
+solo. **Decisión: se deja así a propósito** — el orden global pierde importancia cuando se
+agreguen filtros a `/sales`, y modelar prioridad explícita (`displayOrder Int` en Branch,
+migración + seed) es una tangente no necesaria hoy. Aceptado conscientemente (distinto a no
+haberlo visto). Si algún día molesta: `displayOrder` en Branch, o filtros en la vista.
+
+### Validación de TOT en el parser de ventas: DESCARTADA (decisión cerrada)
+
+El TODO opcional de la RAMA 4 (validar la suma de tuplas de un bloque contra su fila `TOT.`)
+**se mató**, no se construyó. Reemplazado por un comentario de decisión cerrada en el código
+para que no se reconsidere. Razones:
+
+1. **Verificación end-to-end ya existe y es más fuerte.** El parser se validó contra el
+   archivo completo (102 tuplas/pares confirmados vs lectura en Python), red más robusta que
+   un check por-bloque.
+2. **Existencias nunca tuvo esta validación y no mordió** en 2 imports correctos.
+3. **El TOT de ventas es ruidoso:** incluye cambios (`CANT=0` + `DEV`) y devoluciones en
+   columnas separadas que este parser ignora a propósito → sumar tuplas vs TOT NO cuadraría
+   limpio sin reconstruir qué parte del TOT es venta pura (lógica nueva no trivial para un
+   check redundante).
+
+La rama `else if (blockCell === "TOT.")` se **mantiene** como no-op documentado (no se borra):
+deja explícito que la fila TOT se reconoce y se ignora a propósito, en vez de confiar en que
+el regex de la RAMA 3 la rebote por accidente. Defensa explícita (sección 12).
+
+**Meta-aprendizaje registrado:** parte del oficio es saber qué NO construir. "Está el dato y
+se podría validar" no es razón suficiente; la pregunta correcta es "¿qué resuelve?", y cuando
+la respuesta es "nada que no esté ya cubierto", se mata. Evita el error común de construir
+redes redundantes que se mantienen, confunden, y dan falsa robustez.
+
+### Estado al cierre
+
+Fase 11 visible (`/sales` viva) + warm-ups cerrados. Sin trabajo a medias. Próxima sesión:
+**importer de ventas con botón** (Server Actions, upload, mutación desde UI — el salto que
+habilitó el refactor `process.exit→throw`). Su pareja: validador "archivo no regresivo".

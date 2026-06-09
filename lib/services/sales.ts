@@ -24,7 +24,11 @@ export async function getSalesData() {
   const movements = await prisma.inventoryMovement.findMany({
     where: { referenceId: { in: salesJobIds } },
     include: { branch: true, product: true },
-    orderBy: { movementDate: "desc" },
+    orderBy: [
+      { movementDate: "desc" },
+      { branchId: "asc" },
+      { quantityDelta: "asc" },
+    ],
   });
 
   return movements.map((m) => ({

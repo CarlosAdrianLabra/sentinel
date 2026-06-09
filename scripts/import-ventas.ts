@@ -107,8 +107,17 @@ function parseSales(rows: unknown[][], movementDate: Date): SaleTuple[] {
 
       // RAMA 4 — fila TOT. (fin de bloque / validación)
       else if (blockCell === "TOT.") {
-        // TODO(opcional): validar suma como en existencias, o solo usar como marca.
-        //   Por ahora podés dejarlo vacío y seguir.
+        // Validación de suma contra TOT: DESCARTADA a propósito (2026-06-09).
+        // 1) El parser ya se verifica end-to-end contra el archivo completo
+        //    (102 tuplas/pares confirmados vs lectura en Python) — red más
+        //    fuerte que un check por-bloque.
+        // 2) Existencias nunca tuvo esta validación y no mordió en 2 imports.
+        // 3) El TOT de ventas incluye cambios (CANT=0 + DEV) y devoluciones
+        //    que este parser ignora a propósito → sumar tuplas vs TOT NO
+        //    cuadraría limpio sin reconstruir qué parte del TOT es venta pura.
+        // El TOT se usa solo como marca de fin de bloque (el `break` del
+        // siguiente producto ya lo cubre, así que esta rama queda como no-op
+        // documentado).
       }
 
       j++;

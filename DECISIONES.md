@@ -887,3 +887,158 @@ idéntico y el findFirst matchea. (Verificado: la 2da corrida matcheó.)
   para calcularla).
 - Operativo: convención de Detalle de Ventas diario con Jesus; validador
   "archivo no regresivo".
+
+## ACTUALIZACIÓN SESIÓN 2026-06-09
+
+### Vista de ventas: COMPLETA Y VERIFICADA — primer pendiente del 2026-06-08 cerrado
+
+Construida la primera UI de ventas, elegida sobre los otros candidatos de scope
+(importer con botón, rotación, validación de TOT, validador no-regresivo) por ser
+el bloque que hace _visible_ el trabajo de Fase 11 con bajo riesgo, reusando el
+patrón de Server Component ya clavado en `/inventory`.
+
+Dos archivos nuevos:
+
+- `lib/services/sales.ts` — servicio `getSalesData()`.
+- `app/sales/page.tsx` — Server Component async, route en inglés (`sales`)
+  siguiendo el patrón `branches`/`imports`/`inventory`.
+
+Commit de código: `feat(sales): vista de ventas con servicio getSalesData y página /sales`.
+
+### `getSalesData` — patrón de DOS queries (no `include`)
+
+El servicio trae los movements `OUT` que produjeron los imports de ventas y los
+aplana a la vista. Es **dos queries encadenadas, no un `include`**, por una razón
+estructural del schema:
+
+- `InventoryMovement.referenceId` es `String?` **sin `@relation`** a `ImportJob`
+  (es genérico: hoy apunta a un ImportJob, mañana podría apuntar a un folio
+  externo — por eso no es un FK tipado).
+- `ImportJob` **no tiene** back-relation `movements InventoryMovement[]`.
+
+Sin relación de ningún lado, no se puede "entrar" desde el ImportJob a sus
+movements en una sola query con `include`. Entonces:
+
+1. **Query 1:** `importJob.findMany({ where: { source: "legacy_sales" }, select: { id: true } })`.
+2. Convertir los ids: `.map((job) => job.id.toString())`.
+3. **Query 2:** `inventoryMovement.findMany({ where: { referenceId: { in: [...] } }, include: { branch, product }, orderBy: { movementDate: "desc" } })`.
+
+**Conversión de tipos — dirección confirmada (refuerza sección 12).**
+`ImportJob.id` es `Int`; `select: { id: true }` devuelve **objetos** `[{ id: 20 }]`,
+no valores sueltos `[20]` (re-confirmado el aprendizaje ya registrado). La columna
+`referenceId` contra la que se filtra es `String` y guarda `"20"`. Regla: se doblan
+**nuestros** valores para que entren en la columna (`Int → String` vía `.toString()`),
+**nunca** la columna. El `.map` saca el `id` del objeto _y después_ lo vuelve string:
+`job.id.toString()`.
+
+### Decisión: filtrar ventas por `source`, no por `movementType`
+
+La vista filtra por _de dónde vino_ el movement (qué import lo creó:
+`source: "legacy_sales"`), no por _qué tipo es_ (`movementType: "OUT"`). Más honesto:
+el modelo permite un `OUT` de traspaso (sección 6) que NO es venta. Hoy todo `OUT`
+en la DB es venta (no se importan traspasos), así que `movementType: "OUT"`
+alcanzaría — pero filtrar por `source` describe exactamente lo que queremos ver
+("lo que produjeron los imports de ventas") y no se rompe el día que exista un OUT
+de traspaso. Fichado: si algún día se importan traspasos, esta query ya está blindada.
+
+**Bug evitado en el `where` (contraste predicción/realidad).** Tentación inicial:
+meter `quantityDelta: -1` en el `where`. Lo descarta el escenario de una venta de 2
+pares (`quantityDelta = -2`), que con ese filtro se caería sin avisar. Lo tramposo:
+contra la DB de hoy (102 movements todos `-1`) el filtro **pasaría** y no delataría
+el bug. `quantityDelta` NO va en el `where`.
+
+### Aplanado del servicio — trade-off registrado
+
+`getSalesData` devuelve objetos **aplanados** (no el resultado crudo de Prisma):
+`{ id, fecha, sucursal, producto, talla, cantidad }`. Decisión correcta **porque el
+servicio sirve UNA vista concreta** (esta página). Regla general para servicios futuros:
+
+- **Aplanar** cuando el servicio sirve una vista específica (columnas ya masticadas).
+- **Devolver crudo** cuando es genérico y no se sabe quién lo consumirá (aplanar de
+  más obliga a tocar el servicio cada vez que una vista nueva quiera un campo recortado).
+
+Consecuencia: si mañana se quiere "ventas por sucursal" o un dashboard que necesite
+`quantityDelta` crudo, **no se estira `getSalesData`** — se hace un servicio nuevo.
+
+**Signo de `cantidad`:** `cantidad: -m.quantityDelta`. El movement guarda el delta
+negativo (`-1` para venta de un par, por el `-tuple.quantity` del parser); la vista lo
+dobla a positivo para que la tabla diga "vendiste 1", no "−1". Se usó `-x` y **no**
+`Math.abs(x)` a propósito: si algún día se cuela un delta positivo donde no debería,
+`-x` lo mostraría negativo (se ve, se sospecha); `Math.abs` lo taparía. Consistente
+con "alarma ruidosa contra lo desconocido" (sección 12). El doblez es correcto pero NO
+se pudo _ver_ funcionar hoy: como todo es `-1 → 1`, una venta de 2 daría `2` pero no
+hay ninguna en este snapshot — su prueba real espera al día que alguien venda 2 pares
+de la misma talla.
+
+### La página — calcada de `/inventory`, dos puntas nuevas
+
+`app/sales/page.tsx` reusa el molde de `/inventory`: Server Component async, `Table`
+de shadcn, `default export`. Columnas: **Fecha · Sucursal · Producto · Talla · Cantidad**
+(Fecha primera por ser el eje del log). `sucursal` lee `branch.name` (`"Abryl"`,
+`"e-commerce"`) por leer mejor que `code` en tabla — preferencia, no regla.
+
+Dos cosas nuevas que TS subrayó antes de correr:
+
+1. **`key={row.id}`** — `getSalesData` no devolvía `id` (se aplanó a 5 columnas
+   visibles). Decisión: **agregar `id` al objeto del servicio** (el id del movement,
+   estable y único — cada venta de talla es un movement distinto), no keyear por índice
+   del `.map` (frágil ante reordenamientos). El servicio ahora devuelve 6 llaves: 5
+   visibles + `id` como plumbing para el `key` de React.
+
+2. **`{row.fecha}` no compila** — `fecha` es `Date | null`; React pinta `string`/`number`
+   como hijo de `<td>` pero **no** un `Date` (es un objeto, no sabe cómo formatearlo).
+   Hay que formatear a string. Se usó `format(row.fecha, "dd/MM/yyyy")` de date-fns — el
+   **inverso** de `parse` (que en `import-ventas.ts` va string → Date; `format` va
+   Date → string).
+
+   El `| null` del tipo viene de que `movementDate` es `DateTime?` en el schema (los
+   `IMPORT_SET` de existencias no lo llenan). **TS razona sobre el tipo de la columna,
+   no sobre "qué trae esta query".** En la práctica esta query solo trae ventas, todas
+   con fecha, así que la rama `: "sin fecha"` nunca se pinta — es defensa contra un
+   **tipo**, no contra un caso real. Se puso igual (barata, calla a TS con honestidad)
+   vía narrowing: `row.fecha ? format(...) : "sin fecha"` (dentro del `?`, TS ya sabe
+   que `fecha` no es null).
+
+### Deuda chica nueva
+
+- **Orden arbitrario dentro de un mismo día.** Se ordena por `movementDate: "desc"`,
+  pero como todas las ventas son del 27/05, el `desc` no tiene nada que desempatar →
+  las filas quedan en orden de inserción de la DB (por `id`). Se ve bien hoy. El día
+  que se importen varios días, las fechas se agruparán de la más nueva a la más vieja,
+  pero _dentro_ de un día el orden seguirá arbitrario. Si se quiere un segundo criterio
+  (ej. sucursal dentro de la fecha), se agrega al `orderBy` como en `/inventory`
+  (array de tres). No urge.
+
+### Verificación end-to-end
+
+`pnpm dev` → `localhost:3000/sales`. Las tres predicciones pegaron:
+
+- **102 filas** (un movement por tupla del único import, ImportJob 20).
+- **Fecha 27/05/2026 en todas** (todas del mismo import, mismo `movementDate`).
+- **Cantidad 1 en todas** (las 102 ventas son de 1 par; ninguna de 2 en este snapshot).
+
+La tabla pinta limpia, relaciones jaladas (Tezonco, e-commerce vía `branch.name`),
+`format` de fecha funcionando. Primera vista de ventas viva.
+
+### Pendientes (próxima sesión / futuro)
+
+Del bloque de candidatos del 2026-06-08 queda cerrado **UI de ventas**. Siguen abiertos:
+
+- **Importer de ventas con botón** — hoy el import es CLI
+  (`pnpm tsx scripts/import-ventas.ts ...`), solo lo corre Carlos. UI de subir archivo +
+  Server Action que llame al parser (lo que habilitó el refactor `process.exit→throw`).
+  El salto técnico más grande pendiente: Server Actions, mutación desde UI, upload.
+- **Validador "archivo no regresivo"** — su red de seguridad: cobra sentido sobre todo
+  cuando Jesus suba archivos solo (ahí se cuela un archivo viejo por error). Comparar
+  `snapshotDate` del archivo entrante contra el último ImportJob COMPLETED; rechazar si
+  es más viejo.
+- **Columna de rotación en `/inventory`** — ya hay movements de venta para calcularla.
+  Antes de codear: decidir qué significa la columna `ROTACION` propia del legacy (¿se
+  espeja o se calcula?) — research corto previo. Territorio nuevo de queries de agregación.
+- **TODO opcional RAMA 4** (validación de suma contra TOT en el parser de ventas) — nunca
+  se hizo; decidir si vale o se descarta como en existencias.
+- **Segundo criterio de orden en `/sales`** (deuda chica de esta sesión, arriba).
+- Deuda chica viva de sesiones previas: log "movements creados" en existencias (cuenta
+  tuplas, no movements); `snapshotDate` reusado para fecha de venta (nombre); columnas
+  huérfanas (deuda C).
+- Operativo: convención de Detalle de Ventas diario con Jesus.

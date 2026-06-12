@@ -63,10 +63,6 @@ function parseSales(rows: unknown[][], movementDate: Date): SaleTuple[] {
       // RAMA 2 — fila SUC. (header de tallas)
       if (blockCell === "SUC.") {
         sizeByColumn = {};
-        // TODO(tuyo): escanear de SIZE_SCAN_START a SIZE_SCAN_END.
-        //   Para cada columna: leer rows[j][col], trim, Number().
-        //   Si es número en [SIZE_MIN, SIZE_MAX] → sizeByColumn[col] = (num/100).toFixed(1)
-        //   (es la MISMA lógica que tu parser de existencias, solo cambia el rango de scan)
         for (let col = SIZE_SCAN_START; col < SIZE_SCAN_END; col++) {
           const headerCell = rows[j][col];
           if (typeof headerCell !== "string") continue;
@@ -184,14 +180,14 @@ function validateTuples(tuples: unknown[]): SaleTuple[] {
 }
 
 async function createImportJob(
-  filePath: string,
+  fileName: string,
   movementDate: Date,
 ): Promise<number> {
   const job = await prisma.importJob.create({
     data: {
       source: "legacy_sales",
       status: "RUNNING",
-      fileName: filePath,
+      fileName: fileName,
       startedAt: new Date(),
       snapshotDate: movementDate,
     },
@@ -251,13 +247,19 @@ async function persistSales(
   return processedCount;
 }
 
-async function main(): Promise<void> {
-  const filePath = getFilePathFromArgs();
+// ───────── EL CORE (lo llaman la CLI y, en Paso 3, la Server Action) ─────────
+
+type VentasImportResult = {
+  importJobId: number;
+  processedCount: number;
+};
+
+export async function runVentasImport(
+  workbook: XLSX.WorkBook,
+  fileName: string,
+): Promise<VentasImportResult> {
   let importJobId: number | undefined;
   try {
-    console.time("total");
-    console.log("Archivo recibido:", filePath);
-    const workbook = readWorkbook(filePath);
     const sheetName = selectDataSheet(workbook);
     const sheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
@@ -288,7 +290,7 @@ async function main(): Promise<void> {
     const branchMap = await buildBranchMap();
 
     // Crear ImportJob (después del chequeo de idempotencia)
-    importJobId = await createImportJob(filePath, movementDate);
+    importJobId = await createImportJob(fileName, movementDate);
 
     const processedCount = await persistSales(tuples, branchMap, importJobId);
 
@@ -302,10 +304,8 @@ async function main(): Promise<void> {
       },
     });
 
-    console.log(`Import de ventas completado. ImportJob ${importJobId}.`);
-    console.log(`Movements creados: ${processedCount}`);
+    return { importJobId, processedCount };
   } catch (error) {
-    // ... (igual que existencias: ZodError, markImportJobFailed, throw)
     if (error instanceof z.ZodError) {
       console.error("Error de validacion de tuplas:");
       for (const issue of error.issues) {
@@ -330,6 +330,19 @@ async function main(): Promise<void> {
 
     throw error;
   }
+}
+
+// ───────── LA CAPA CLI (lo sucio: argv + disco + exit codes) ─────────
+
+async function main(): Promise<void> {
+  console.time("total");
+  const filePath = getFilePathFromArgs();
+  console.log("Archivo recibido:", filePath);
+  const workbook = readWorkbook(filePath); // ← acá se lee el disco; la action hará XLSX.read(bytes)
+
+  const result = await runVentasImport(workbook, filePath); // CLI usa filePath como fileName
+  console.log(`Import de ventas completado. ImportJob ${result.importJobId}.`);
+  console.log(`Movements creados: ${result.processedCount}`);
 }
 
 main()

@@ -1112,3 +1112,217 @@ redes redundantes que se mantienen, confunden, y dan falsa robustez.
 Fase 11 visible (`/sales` viva) + warm-ups cerrados. Sin trabajo a medias. Próxima sesión:
 **importer de ventas con botón** (Server Actions, upload, mutación desde UI — el salto que
 habilitó el refactor `process.exit→throw`). Su pareja: validador "archivo no regresivo".
+
+## ACTUALIZACIÓN SESIÓN 2026-06-15
+
+### Importer de ventas con botón — Server Actions de punta a punta
+
+Primer bloque que toca Server Actions, upload desde navegador y mutación desde
+UI (el salto técnico que habilitó el refactor `process.exit→throw`). Atacado en
+3 pasos chicos + verificación del happy path. Todo commiteado, código separado
+por responsabilidad. Carpeta nueva `app/imports/ventas/` (URL `/imports/ventas`),
+sin tocar nada existente.
+
+**Concepto base — Server Component vs Client Component.** No es la extensión
+(`.tsx` los dos): es la CLASE de componente. La línea divisoria operativa:
+¿la pantalla cambia DESPUÉS de cargar, reaccionando al usuario?
+
+- **Sí → Client Component** (`"use client"`): corre en el navegador, guarda
+  estado (`useState`), reacciona a clicks/eventos. Es el form de subir.
+- **No → Server Component** (el DEFAULT en App Router): corre en el servidor,
+  arma el HTML una vez, no reacciona. Es `/sales`, `/inventory`, etc.
+  Una página Server puede montar adentro una "isla" Client (la página monta el
+  form) — los dos tipos conviven.
+
+**Concepto base — qué es una Server Action.** Por debajo ES una llamada API (un
+`POST`) al servidor — pero Next.js genera el endpoint, el `fetch` y la
+serialización del JSON por vos. Escribís UNA función con `"use server"`, la
+importás y la llamás como si fuera local; Next arma los dos extremos. (Analogía
+para el background no-code: como un backend workflow de Bubble, salvo que el
+cuerpo lo escribís vos.)
+
+### Paso 1 — Esqueleto del cable (commit 27b0316)
+
+Probar el cruce navegador→servidor→navegador con un payload de juguete, sin
+parser ni DB. Cuatro archivos en `app/imports/ventas/`:
+
+- `types.ts` — `ImportResult` (en Paso 1: `{ fileName, rowCount }`, de juguete).
+- `actions.ts` — Server Action `importVentas(formData)`. Saca el `File` del
+  `FormData`, guard `if (!(file instanceof File)) throw`, lee los BYTES
+  (`file.arrayBuffer()` → `XLSX.read(Buffer.from(bytes), { type: "buffer" })`),
+  cuenta filas crudas y devuelve nombre + conteo.
+- `import-form.tsx` — Client Component (`"use client"`): `<input type="file">`
+  - botón en un `<form action={handleSubmit}>`, `useState` para result/error,
+    llama a la action en un `try/catch`.
+- `page.tsx` — Server Component que monta el form.
+
+**Aprendizaje (bytes, no ruta):** en el navegador NO hay ruta en disco; el
+archivo es un `File` en memoria. Por eso la action lee bytes con `XLSX.read`,
+no `XLSX.readFile` (que lee de disco, lo de la CLI). Este es el detalle que
+diferencia el lado action del lado CLI.
+
+**Aprendizaje (manejo de `unknown` en catch):** en un `catch`, `e` es `unknown`
+(JS puede lanzar cualquier cosa, no solo `Error`). TS no deja tocar `.message`
+hasta probar el tipo: `e instanceof Error ? e.message : String(e)`.
+
+**Verificado:** subir el Detalle de Ventas mostró "archivo
+rptNewVentasDetallegeneral.xlsx — 464 filas", POST 200. (464 = filas crudas de
+la hoja: header del reporte + descripciones + headers de talla + TOT., NO las
+102 ventas; eso sale del parseo real.) Primer dato cruzando ida y vuelta.
+
+**Bug cazado por Carlos sin ayuda:** un input de archivo VACÍO igual manda un
+`File` (nombre `""`, 0 bytes), así que pasa el guard `instanceof File` (es un
+File de verdad) y revienta más abajo cuando SheetJS lee 0 bytes → workbook sin
+hojas. El guard chequea el TIPO, no si se eligió algo. (Candidato a la X de
+"archivo no válido" más adelante.)
+
+### Paso 2 — Refactor: core reusable (commit 5731309)
+
+Extraído de `main()` un core que trabaja sobre un workbook ya leído, para que lo
+llamen los dos: la CLI (disco → workbook) y la Server Action (bytes → workbook).
+Refactor puro, sin cambio de comportamiento.
+
+**El corte:** la única línea que "sabe de disco" es `readWorkbook` (=
+`XLSX.readFile(path)`). Todo lo que viene DESPUÉS de tener un `workbook` en la
+mano no necesita saber de dónde salió. Por eso el core recibe el WORKBOOK (la
+primera cosa que ambos lados producen), no la ruta (solo la CLI) ni los bytes
+(solo la action).
+
+**Firma decidida (por Carlos):**
+`runVentasImport(workbook: XLSX.WorkBook, fileName: string) → Promise<VentasImportResult>`,
+con `type VentasImportResult = { importJobId: number; processedCount: number }`.
+
+- Recibe `fileName` (string ya resuelto) en vez de `filePath`: cada llamador lo
+  arma a su manera (CLI pasa `filePath`, action pasa `file.name`), pero al core
+  le llega un string a secas.
+- **Devuelve** un dato en vez de imprimir con `console.log`. Razón: un core que
+  imprime está clavado a la terminal (inútil para la action, que necesita el
+  dato de vuelta en el navegador). El core entrega información; cada llamador
+  decide qué hacer (CLI imprime, action arma `ImportResult`). Mismo principio
+  que `throw` vs `process.exit` (sección 12).
+
+**Cambios concretos:** nació `runVentasImport` (cuerpo de trabajo de `main` +
+el `catch` con `markImportJobFailed`/`throw`, terminando en
+`return { importJobId, processedCount }`). `main` adelgazó a argv → `readWorkbook`
+→ llamar al core → imprimir. `createImportJob` renombró su parámetro
+`filePath → fileName`.
+
+**Verificado:** la CLI sobre el archivo del 27/05 (ya importado, ImportJob 20)
+abortó por idempotencia con exit 1 — IDÉNTICO a antes del refactor. El throw
+viajó core → main → `.catch()` del fondo. Comportamiento externo intacto.
+
+### Paso 3 — Conectar la action al core real (commits 73b718f, d00021a)
+
+**Problema A — el `main()` se autoejecuta al importar.** Importar CUALQUIER cosa
+de un módulo ejecuta el archivo ENTERO de arriba abajo, una vez. El
+`main().catch().finally()` suelto al nivel del archivo correría apenas la action
+hiciera `import { runVentasImport }` — y `main` llama a `getFilePathFromArgs`,
+que sin `process.argv[2]` (no hay terminal en el servidor) lanza "falta el
+argumento". El importer caería por una razón absurda.
+
+**Solución (commit 73b718f):** guardar el `main()` para que corra SOLO si el
+archivo se ejecuta directo como script. Concepto: comparar "¿quién es el punto
+de entrada?" contra "¿quién soy yo?". En ESM (Prisma 7 obliga `"type": "module"`)
+NO existe el `require.main === module` de CommonJS; se usa:
+
+```ts
+import { pathToFileURL } from "node:url";
+if (import.meta.url === pathToFileURL(process.argv[1]).href) { main()... }
+```
+
+`import.meta.url` = mi URL (Ruta B); `process.argv[1]` = el archivo que arrancó
+(Ruta A, ruta de sistema → `pathToFileURL` la lleva a URL para comparar URL vs
+URL; `.href` la vuelve string). Corrés directo → coinciden → corre `main`. Te
+importan → no coinciden → no corre nada al cargar el módulo.
+Verificado: CLI directa sigue abortando por idempotencia, exit 1, idéntico.
+
+**Dos build errors de Turbopack diagnosticados leyendo el import trace** (sin
+solución dada — Carlos los resolvió con guía):
+
+1. **"Module not found: Can't resolve 'fs'"** — el trace mostraba
+   `import-ventas.ts [Client Component Browser]`: el código de servidor (Prisma →
+   better-sqlite3 → `fs`) se estaba arrastrando al bundle del navegador. Causa:
+   a `actions.ts` se le había perdido el `"use server"` de la primera línea.
+   `"use server"` es load-bearing — es la marca que le dice a Next "esto se queda
+   en el servidor, no lo mandes al navegador". Restaurado → resuelto.
+2. **"Export default doesn't exist in target module"** en `import XLSX from "xlsx"`.
+   `xlsx` no tiene export default (tiene named: `readFile`, `utils`, `read`).
+   `pnpm tsx` es permisivo y lo deja pasar; Turbopack es estricto y truena.
+   Fix: `import * as XLSX from "xlsx"` (namespace = todo el módulo como objeto),
+   igual que ya estaba en `actions.ts`. **Aprendizaje general:** si un build
+   error aparece solo bajo Turbopack pero el script corría con `tsx`, sospechar
+   diferencias estricto-vs-permisivo (default imports, etc.).
+
+**Conexión (commit d00021a):** la action dejó el conteo de juguete y ahora hace
+`const result = await runVentasImport(workbook, file.name); return result;`.
+`ImportResult` redefinido a `{ importJobId, processedCount }` (la forma que
+devuelve el core), así `return result` calza directo (mismo objeto, no se
+reconstruye campo por campo). **Aprendizaje:** cambiar la FORMA de un tipo
+obliga a actualizar TODOS sus consumidores — el `<p>` del form quedó pidiendo
+`result.fileName`/`result.rowCount` (campos del juguete viejo) y dio rojo hasta
+actualizarlo a `importJobId`/`processedCount`.
+
+**Verificado (camino de error):** subir el archivo del 27/05 desde el navegador
+mostró en pantalla la X "Ya existe un import de ventas COMPLETED para 27/05/2026
+(ImportJob 20)..." — el throw de idempotencia del core nacido en lo profundo de
+la lógica, subiendo hasta el `setError` del form. Cero movements nuevos.
+
+### Happy path verificado — el importer crea movements desde un click
+
+Para ver el camino de ÉXITO (la idempotencia tapaba el 27/05), se liberó la
+fecha con borrado manual en Studio:
+
+- Borrados los 102 `InventoryMovement` con `referenceId = "20"` Y el ImportJob 20.
+- **Aprendizaje:** borrar el ImportJob NO borra sus movements (no hay
+  `onDelete: Cascade`; son tablas separadas ligadas solo por `referenceId`
+  string, consistente con que `referenceId` es `String?` sin `@relation`). Si
+  se borra solo el job y se reimporta → 204 movements (102 viejos huérfanos +
+  102 nuevos). Hay que borrar AMBOS para que quede limpio en 102.
+
+Reimport desde el navegador → pantalla: "Import OK — ImportJob 21, 102 movements
+creados". POST 200, terminal limpia, `Fecha de venta: 2026-05-27`.
+Verificado en Studio (referenceId 21):
+
+- **102 movements**, todos `OUT`, `quantityDelta = -1`, `movementDate = 27/05`.
+- branches **7, 8, 9** (ABRYL/TEZONCO/ECOMM) — ninguna 13/18/19. El parser
+  ruteó los qualifiers correctamente.
+- ImportJob 21 COMPLETED, `totalRows`/`processedRows` = 102, `fileName` correcto.
+- **id 21, no 20:** SQLite no recicla el autoincrement aunque se borre la fila
+  (mismo fenómeno ya visto con ImportJobs previos).
+
+El historial de ventas (OUT) y el de existencias (IMPORT_SET, ids ~15.700)
+conviven en la misma `InventoryMovement`, distinguidos por `referenceId` y
+`movementType`.
+
+### Deuda chica nueva
+
+- **Happy path solo probado con borrado manual del 27/05.** Falta probarlo con
+  un archivo de un día NUEVO (lo realista; estrena la convención diaria con
+  Jesús). El borrado manual fue para test, no es flujo normal.
+- **Texto del `<p>` de éxito mínimo** ("Import OK — ImportJob 21, 102 movements
+  creados"). Funcional pero crudo; el polish (estados idle→procesando→✓/X) es el
+  Paso 4. Decisión consciente, no se pulió hoy.
+- **`main()` pasa `filePath` como `fileName`** a `createImportJob` — la CLI
+  guarda la ruta completa como "nombre". Cosmético.
+
+### Estado al cierre
+
+Pasos 1-2-3 del importer de ventas cerrados + happy path verificado de punta a
+punta. El salto técnico grande (Server Actions + upload + mutación desde UI)
+está hecho y probado en sus DOS caminos (éxito + idempotencia). 4 commits sin
+pushear (27b0316, 5731309, 73b718f, d00021a). Sin trabajo a medias.
+
+**Próxima sesión — candidatos:**
+
+- **Paso 4 — estados visuales en el form:** idle → "procesando" → ✓ con conteo /
+  X con mensaje. Lo que falta para que se vea pulido y no texto pelón.
+- **Paso 5 — refrescar la vista:** tras import exitoso, `revalidatePath("/sales")`
+  para que el Server Component relea la DB y la tabla se actualice sola.
+- **Paso 6 — validador "archivo no regresivo":** rechazar un archivo con
+  `snapshotDate` más viejo que el último ImportJob COMPLETED. Cobra sentido sobre
+  todo cuando Jesús suba archivos solo.
+- Probar el happy path con un día nuevo de Jesús.
+
+**Deuda viva de antes:** log "movements creados" en existencias (cuenta tuplas);
+`snapshotDate` reusado para fecha de venta (nombre); columnas huérfanas (deuda C);
+rotación en `/inventory`; convención de Detalle de Ventas diario con Jesús.

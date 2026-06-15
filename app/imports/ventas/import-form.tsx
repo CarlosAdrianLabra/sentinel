@@ -33,7 +33,8 @@ export function ImportForm() {
 
       {result && (
         <p>
-          archivo {result.fileName} — {result.rowCount} filas
+          Import OK — ImportJob {result.importJobId}, {result.processedCount}{" "}
+          movements creados
         </p>
       )}
       {error && <p>Error: {error}</p>}

@@ -1,8 +1,9 @@
-import XLSX from "xlsx";
+import * as XLSX from "xlsx";
 import { z } from "zod";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../generated/prisma/client";
 import { parse } from "date-fns";
+import { pathToFileURL } from "node:url";
 
 const adapter = new PrismaBetterSqlite3({
   url: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
@@ -345,12 +346,14 @@ async function main(): Promise<void> {
   console.log(`Movements creados: ${result.processedCount}`);
 }
 
-main()
-  .catch((error) => {
-    console.error("Error fatal:", error);
-    process.exit(1);
-  })
-  .finally(async () => {
-    console.timeEnd("total");
-    await prisma.$disconnect();
-  });
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
+    .catch((error) => {
+      console.error("Error fatal:", error);
+      process.exit(1);
+    })
+    .finally(async () => {
+      console.timeEnd("total");
+      await prisma.$disconnect();
+    });
+}

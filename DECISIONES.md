@@ -1449,3 +1449,100 @@ medias. 1 commit pusheado.
 tuplas); `snapshotDate` reusado para fecha de venta (nombre); columnas
 huérfanas (deuda C); validación de TOT en ventas (descartada, no se reabre);
 convención de Detalle de Ventas diario con Jesús.
+
+## ACTUALIZACIÓN SESIÓN 2026-06-16 (cont. — sello de scope del MVP)
+
+Sesión de scope, NO de código. Antes de seguir construyendo, se selló qué
+entra al MVP y qué se posterga, partiendo de la pregunta que destraba todo:
+**¿qué hace Jesús el día 1 que usa Sentinel sin llamar a Carlos?**
+
+### La pregunta que cierra el scope: el día 1 de Jesús
+
+Caminado paso a paso (no asumido). El día a día operativo de Jesús se reduce
+a **dos flujos de subida + dos vistas**, sin intervención de Carlos:
+
+1. **Sube ventas del día** (diario) → importer con botón, ya construido.
+2. **Sube existencias** (semanal — confirmado con Jesús esta sesión) →
+   importer con botón, POR CONSTRUIR (gemelo del de ventas).
+3. **Mira `/sales`** (qué se vendió) y **`/inventory`** (stock actual) → ya viven.
+
+### Tres flujos colapsaron a dos: compras queda fuera (re-confirmado)
+
+Carlos planteó un tercer flujo (entradas/compras, vía archivo COMPRAS o vía
+re-sacar existencias). Colapsado a cero flujos nuevos por la razón ya
+registrada en 8.4, re-confirmada y todavía cierta:
+
+- Jesús captura cada lote en INVENSHOES al recibirlo → el **próximo snapshot
+  de existencias ya trae las entradas adentro**. COMPRAS no aporta nada
+  operativo (solo dato financiero, que no es lo que Sentinel resuelve).
+- Las dos opciones de Carlos eran en realidad la misma: "sacar existencias
+  para ver los nuevos" ES el flujo de existencias recurrente. No hay flujo de
+  compras separado.
+
+### Existencias es RECURRENTE, no "una sola vez" (corrección de supuesto)
+
+Supuesto inicial de Carlos: existencias se sube una vez. Refutado caminando
+la consecuencia: el parser de ventas escribe SOLO `InventoryMovement`, NUNCA
+`InventoryPosition` (decisión central, sesión 2026-06-02). Entonces un día de
+ventas NO baja las posiciones; sin re-subir el snapshot, `/inventory` se
+desactualiza contra la realidad física de la tienda. Por eso existencias es
+semanal, no único. (Y ese mismo snapshot semanal trae las entradas gratis —
+de ahí que compras no haga falta.)
+
+### Cadencias selladas
+
+- **Ventas → diario.** Un Detalle de Ventas por día = un día = una fecha de
+  movement (convención ya registrada, sesión 2026-05-29).
+- **Existencias → semanal.** Confirmado con Jesús esta sesión.
+
+### MVP — qué ENTRA (lista para tachar)
+
+1. **Importer de ventas con botón** — Pasos 1-4 hechos. Falta:
+   - **Paso 5:** `revalidatePath("/sales")` tras import exitoso (refrescar la
+     vista sola, hoy hay que recargar a mano).
+   - **Paso 6:** validador "archivo no regresivo" (rechazar archivo con fecha
+     más vieja que el último ImportJob COMPLETED). Diseñar con la cabeza
+     puesta en que se reusa para existencias (comparan fechas distintas:
+     ventas la fecha de venta, existencias el `snapshotDate`).
+2. **Importer de existencias con botón** — POR CONSTRUIR. Gemelo del de
+   ventas, semanal. Reusa el molde de Server Action ya clavado (core
+   reusable + estados con discriminated union + refresh + validador).
+3. **Vistas `/inventory` y `/sales`** — ya viven.
+
+### MVP — qué se POSTERGA
+
+- **COMPRAS / entradas** — fuera. Las entradas viajan en el snapshot de
+  existencias.
+- **Columna de rotación en `/inventory`** — hay datos de venta, pero requiere
+  research previo (qué significa la columna `ROTACION` del legacy) + queries
+  de agregación. Post-MVP.
+- **Polish visual** — spinner de "procesando" (deuda de hoy), estados bonitos
+  idle→procesando→✓/X con feedback visible.
+- **Productos no-zapato** (talla categórica) — deuda diferida de Fase 8.
+- **Kardex como import masivo** — inviable (1x1); queda como drill-down futuro.
+- **Devoluciones explícitas en ventas** (`DEV.`/`IMP. DEV.`) — modelar como
+  `IN` compensatorios, post-MVP.
+- **Deuda chica viva** — log "movements creados" en existencias (cuenta
+  tuplas); `snapshotDate` reusado para fecha de venta (nombre); columnas
+  huérfanas (deuda C); validación de TOT en ventas (descartada, no se reabre).
+
+### Orden de ataque acordado (consejo de Claude, aceptado por Carlos)
+
+Cerrar ventas ANTES de clonar a existencias — para no tener dos importers a
+medias y diseñar el validador (Paso 6) una sola vez bien antes de duplicar:
+
+1. **Paso 5 (refrescar `/sales`)** — chico, bajo riesgo, cierra el lazo visual.
+2. **Paso 6 (validador no-regresivo)** — el de jugo de diseño; la red que
+   importa cuando Jesús sube solo. Pensarlo reusable para existencias.
+3. **Probar happy path con un DÍA NUEVO de Jesús** — hoy solo se probó
+   liberando el 27/05 a mano. El primer archivo real de un día no tocado
+   estrena la convención diaria; si algo se rompe, que se rompa en el flujo
+   ya conocido, no en el gemelo nuevo.
+4. **Importer de existencias con botón** — clonar el molde completo y ajustar
+   diferencias. El salto técnico grande (Server Actions + upload + mutación)
+   ya está dado en ventas.
+
+### Estado al cierre
+
+Scope del MVP sellado. Próximo bloque de código: **Paso 5 —
+`revalidatePath("/sales")` en la action de ventas**.

@@ -1326,3 +1326,126 @@ pushear (27b0316, 5731309, 73b718f, d00021a). Sin trabajo a medias.
 **Deuda viva de antes:** log "movements creados" en existencias (cuenta tuplas);
 `snapshotDate` reusado para fecha de venta (nombre); columnas huérfanas (deuda C);
 rotación en `/inventory`; convención de Detalle de Ventas diario con Jesús.
+
+## ACTUALIZACIÓN SESIÓN 2026-06-16
+
+### Paso 4 del importer — estados visuales del form con discriminated union
+
+Cerrado el Paso 4: el form de `/imports/ventas` ahora modela sus cuatro
+estados visuales (idle → procesando → éxito → error) con un solo `useState`
+tipado como **discriminated union**, en vez de flags booleanos sueltos.
+Territorio nuevo para Carlos (primera vez escribiendo una unión + narrowing);
+escribió la mayor parte del código guiado por preguntas. Un solo commit
+(código de una pieza conceptual que toca dos archivos):
+`feat(imports): estados visuales del form con discriminated union`.
+
+**El problema de los flags sueltos (por qué NO tres booleanos).**
+La tentación era agregar `loading` al lado de `result`/`error` que ya tenía
+el form. Tres booleanos independientes = 2×2×2 = **8 combinaciones**, pero la
+UI solo tiene **4 estados reales**. Las 4 combinaciones sobrantes son estados
+imposibles (cargando Y éxito a la vez, éxito Y error a la vez, etc.) que
+NADA en el tipo impide construir — solo se evitan apagando flags a mano
+(justo lo que hacían los `setError(null); setResult(null)` del arranque).
+Cada flag nuevo agrega más apagados manuales que mantener, y el día que se
+olvide uno, la pantalla muestra algo incoherente sin que nadie avise.
+
+**La solución — estados imposibles, irrepresentables.** Un solo valor que
+solo puede ser UNO de cuatro objetos, cada uno con su etiqueta (`status`) y
+solo los datos que ese caso tiene:
+
+```typescript
+// app/imports/ventas/types.ts
+export type FormState =
+  | { status: "idle" }
+  | { status: "procesando" }
+  | { status: "exito"; result: ImportResult }
+  | { status: "error"; mensaje: string };
+```
+
+Principios que cristalizaron:
+
+- **2×2×2, no 2+2+2.** Flags independientes multiplican combinaciones, no
+  suman. N booleanos = 2^N estados representables; si el dominio real tiene
+  menos, la diferencia son estados basura que hay que tapar a mano.
+- **Cada caso carga SOLO su dato.** `idle`/`procesando` van vacíos (no pasó
+  nada todavía). `exito` trae el `ImportResult` que devuelve la action.
+  `error` trae solo el `mensaje` (cuando falla NO hay job — el throw de
+  idempotencia salta antes de `createImportJob`, así que no hay `importJobId`
+  que mostrar). Meter todos los campos en todos "por las dudas" es el
+  anti-patrón que esto mata.
+- **Reusar `ImportResult` adentro del caso `exito`** (`result: ImportResult`),
+  no repetir `importJobId`/`processedCount` sueltos. Una fuente de verdad: el
+  día que la action devuelva un campo más, se toca SOLO `ImportResult` y el
+  caso `exito` lo hereda. (Mismo principio "imports/tipos honestos" sección 12.)
+- **Narrowing por el discriminante.** En el JSX, `form.status === "exito"`
+  hace que TS sepa, DENTRO de ese bloque, que `form.result` existe — y deja
+  leerlo sin queja. Pero `form.result` en el bloque `idle` NO compila
+  ("result no existe en ese estado"). El tipo obliga a chequear antes de tocar
+  el dato; los typos de etiqueta (`"exitooo"`) y los campos faltantes tampoco
+  compilan. La red completa.
+
+**El `handleSubmit` con estado único.** Desaparecieron los dos `setX(null)`
+del arranque (ya no hay nada que sincronizar): `setForm({ status: "procesando" })`
+antes del `await`, `setForm({ status: "exito", result: res })` si vuelve bien,
+`setForm({ status: "error", mensaje })` en el catch. El estado inicial es
+`{ status: "idle" }` — el "vacío" vive DENTRO de la unión, sin `| null`
+(que habría dado dos formas de decir "nada": `null` y `"idle"`).
+
+### Verificación en vivo — las cuatro ramas
+
+Las cuatro se vieron en pantalla en `localhost:3000/imports/ventas`:
+
+- **idle** → "Selecciona un archivo" al entrar. ✓
+- **procesando** → **NO se alcanza a ver** en imports chicos (~102 filas,
+  lectura local en decenas de ms): el `setForm({procesando})` y el
+  `setForm({exito/error})` que lo apaga ocurren casi al instante → parpadeo
+  por debajo del umbral perceptible. Refutó la predicción de Carlos ("la
+  alcanzaría a ver"); el cronómetro real manda, no la intuición. ✓ (ver deuda)
+- **error** → idempotencia del core (subir el 27/05 ya importado) viajó hasta
+  la rama `error` nueva y se pintó con `form.mensaje`. ✓
+- **exito** → tras liberar el 27/05, "Import Ok - ImportJob 22, 102 movements
+  creados", leído con `form.result.importJobId`/`form.result.processedCount`. ✓
+
+**Liberar el 27/05 (repaso del aprendizaje 06-15):** se borraron en Studio
+los 102 `InventoryMovement` con `referenceId="21"` **Y** el ImportJob 21.
+Borrar solo el job dejaría 102 movements huérfanos → al reimportar, 204.
+Confirmado: no hay `onDelete: Cascade` (tablas ligadas solo por `referenceId`
+string, sin `@relation`). **ImportJob 22, no 21:** SQLite no recicla el
+autoincrement al borrar la fila (fenómeno ya visto).
+
+### Deuda chica nueva
+
+- **Spinner / feedback de "procesando" para imports lentos.** Hoy el
+  "procesando" es un parpadeo invisible en archivos chicos (de un día). El
+  código está bien (las 4 ramas funcionan); NO es un bug. Pero el día que un
+  import tarde (archivo grande, servidor legacy lento, día de muchas ventas),
+  el usuario podría darle "Subir" dos veces creyendo que no pasó nada (la
+  idempotencia lo salva de duplicar, pero la UX confunde). Resolverlo con un
+  spinner y/o deshabilitar el botón mientras `status === "procesando"`.
+  **Diferido al polish visual** ("poner bonita la app"), no urgente.
+
+### Estado al cierre
+
+Paso 4 cerrado, las 4 ramas verificadas en vivo. Discriminated union +
+narrowing entendidos y escritos por Carlos (concepto nuevo). Sin trabajo a
+medias. 1 commit pusheado.
+
+**Próxima sesión — candidatos (del bloque del importer y deuda viva):**
+
+- **Paso 5 — refrescar la vista tras import:** `revalidatePath("/sales")` en
+  la action para que el Server Component relea la DB y la tabla `/sales` se
+  actualice sola tras un import exitoso (hoy hay que recargar a mano).
+- **Paso 6 — validador "archivo no regresivo":** rechazar un archivo con
+  `snapshotDate`/fecha más vieja que el último ImportJob COMPLETED. Cobra
+  sentido sobre todo cuando Jesús suba archivos solo.
+- **Polish visual** (incluye el spinner de la deuda de hoy): estados
+  idle→procesando→✓/X con feedback visible, no texto pelón.
+- Probar el happy path con un **día nuevo** de Jesús (estrena la convención
+  diaria real; hoy se probó con el 27/05 liberado a mano).
+- **Columna de rotación en `/inventory`** (ya hay movements de venta;
+  research previo: qué significa la columna `ROTACION` del legacy).
+
+**Deuda viva de antes:** log "movements creados" en existencias (cuenta
+tuplas); `snapshotDate` reusado para fecha de venta (nombre); columnas
+huérfanas (deuda C); validación de TOT en ventas (descartada, no se reabre);
+convención de Detalle de Ventas diario con Jesús.

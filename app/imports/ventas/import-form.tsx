@@ -3,25 +3,19 @@
 
 import { useState } from "react";
 import { importVentas } from "./actions";
-import type { ImportResult } from "./types";
+import { type FormState } from "./types";
 
 export function ImportForm() {
-  const [result, setResult] = useState<ImportResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState<FormState>({ status: "idle" });
 
   async function handleSubmit(formData: FormData) {
-    setError(null);
-    setResult(null);
+    setForm({ status: "procesando" });
     try {
       const res = await importVentas(formData);
-      setResult(res);
+      setForm({ status: "exito", result: res });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-
-      // TODO 3 — `e` es de tipo `unknown` (TS no sabe qué te lanzan en un catch).
-      //   Sacá el mensaje y guardalo con setError.
-      //   Pista: e instanceof Error ? e.message : String(e)
-      //setError("TODO"); // TODO: reemplazá esto
+      const mensaje = e instanceof Error ? e.message : String(e);
+      setForm({ status: "error", mensaje: mensaje });
     }
   }
 
@@ -31,13 +25,15 @@ export function ImportForm() {
       <input type="file" name="file" accept=".xlsx" />
       <button type="submit">Subir y leer</button>
 
-      {result && (
+      {form.status === "procesando" && <p>Procesando...</p>}
+      {form.status === "idle" && <p>Selecciona un archivo</p>}
+      {form.status === "exito" && (
         <p>
-          Import OK — ImportJob {result.importJobId}, {result.processedCount}{" "}
-          movements creados
+          Import Ok - ImportJob {form.result.importJobId},{" "}
+          {form.result.processedCount} movements creados
         </p>
       )}
-      {error && <p>Error: {error}</p>}
+      {form.status === "error" && <p>Error: {form.mensaje}</p>}
     </form>
   );
 }

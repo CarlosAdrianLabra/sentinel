@@ -1546,3 +1546,182 @@ medias y diseñar el validador (Paso 6) una sola vez bien antes de duplicar:
 
 Scope del MVP sellado. Próximo bloque de código: **Paso 5 —
 `revalidatePath("/sales")` en la action de ventas**.
+
+## ACTUALIZACIÓN SESIÓN 2026-06-18
+
+Sesión de código: cerrados **Paso 5** (refrescar `/sales` tras import) y
+**Paso 6** (validador no-regresivo) del importer de ventas, más el happy path
+verificado con un día genuinamente nuevo. Dos commits de código separados.
+
+### Paso 5 — `revalidatePath("/sales")` en la action de ventas
+
+`app/imports/ventas/actions.ts`: una línea `revalidatePath("/sales")` después
+del `await runVentasImport(...)`, antes del `return`. Commit:
+`feat(imports): revalida /sales tras un import de ventas exitoso`.
+
+**Qué hace y qué NO hace (aclarado en sesión, era confusión, no bug):**
+
+- `revalidatePath` NO empuja nada a una pestaña abierta. NO actualiza en vivo
+  una pantalla que ya está renderizada y quieta. No es push/websocket/sondeo
+  (lo que Carlos llamó "webhook" al principio — descartado, no es eso).
+- Lo que hace: **invalida el caché** de `/sales`. La PRÓXIMA vez que alguien
+  navegue a `/sales` (clic en link, o llegar a la página de nuevo), Next no
+  tiene la versión cacheada → la re-renderiza desde cero → relee la DB →
+  aparecen las ventas nuevas. Es "fresco en la próxima navegación", no "se
+  actualiza solo en pantalla".
+  **Por qué va DESPUÉS del `await`, no antes (aprendizaje del signo/orden):**
+  invalidar el caché es decir "la próxima lectura traerá algo mejor" — y eso
+  solo es cierto si el algo mejor YA está escrito. Si `revalidatePath` corre
+  ANTES de `runVentasImport`, se tira el caché cuando los movements todavía no
+  están en la DB; una lectura en ese hueco re-cachea la versión vieja. Regla:
+  **se invalida el caché DESPUÉS de que el dato nuevo ya existe, nunca antes.**
+  Como va después del `await`, si el import tira (idempotencia/validador), el
+  throw corta antes y el revalidate naturalmente NO se ejecuta — no hay nada que
+  refrescar, correcto. No hay que excluir el error a mano; el throw ya corta.
+
+**F5 vs navegar (por qué el revalidate vale la pena aunque "igual recarga"):**
+
+- **F5 / recarga dura:** el navegador tira TODA la página y la pide de cero
+  (HTML, CSS, JS). Pesado, parpadeo, pantalla en blanco.
+- **Navegar (clic en link interno):** Next NO tira todo; mantiene la app
+  cargada y pide solo el pedazo que cambió. Con el revalidate, ese pedazo
+  viene fresco de la DB. Transición suave, sin parpadeo.
+- Sin el revalidate, navegar a `/sales` daría la versión cacheada vieja.
+  Con él, navegar trae lo nuevo. Jesús no escribe URLs ni da F5 — clickea
+  links; esos clics son navegación, y el revalidate los hace traer datos
+  frescos.
+  **Lección de proceso (Claude falló, registrado):** el ejemplo que Claude usó
+  para presentar el Paso 5 ("Jesús tiene `/sales` en una pestaña, importa en
+  otra, vuelve a la primera") apuntaba al ÚNICO caso que el revalidate NO
+  resuelve (pestaña abierta y quieta). Eso mandó a Carlos a probar cambiando de
+  pestaña, que nunca puede funcionar, y costó media sesión persiguiendo un bug
+  inexistente. El código del Paso 5 siempre estuvo bien. Verificación correcta =
+  navegar de cero, no cambiar de pestaña. **Para futuras sesiones: marcar
+  explícito el cambio de fase ("esto ya es código, editamos tal archivo") antes
+  de mandar a tocar nada — Claude lo hizo sin avisar y generó frustración.**
+
+### Paso 6 — Validador "archivo no regresivo"
+
+`scripts/import-ventas.ts`, dentro de `runVentasImport`, JUSTO DESPUÉS del
+bloque de idempotencia. Commit:
+`feat(imports): validador no-regresivo en el import de ventas`.
+
+**Las cuatro decisiones de diseño (todas razonadas por Carlos):**
+
+1. **Compara contra el último ImportJob COMPLETED del mismo `source`.** No
+   contra cualquiera: un FAILED no cuenta (si contara, un import que explotó
+   bloquearía el reintento). Solo COMPLETED.
+2. **Filtra por `source`** (`legacy_sales`) → cada importer compara contra los
+   SUYOS. Reusable para existencias sin cambios: existencias pasará su propio
+   source y comparará snapshots de existencias contra snapshots de existencias,
+   nunca peras con manzanas. (Mismo campo que usa la idempotencia y `/sales`.)
+3. **Sin imports previos → pasa** (arranque vacío; no hay contra qué comparar).
+4. **Rechazo con `<` ESTRICTO**, no `<=`. El caso de igualdad (mismo día) se le
+   deja a la IDEMPOTENCIA, que ya lo cubre. Razón conceptual: "mismo día" es un
+   DUPLICADO (ya lo importaste), no un RETROCESO (ir a un día anterior). Cada
+   defensa con una responsabilidad limpia: idempotencia agarra el duplicado, el
+   no-regresivo agarra el retroceso. Principio: **no metés una defensa a hacer
+   el trabajo de otra solo porque "de paso podría"** — el `<=` funcionaría pero
+   ensucia responsabilidades. Primo del meta-aprendizaje de la validación de
+   TOT (saber qué NO abarcar).
+   **Implementación — `findFirst` + `orderBy desc` = "el más reciente":**
+
+```typescript
+const lastSales = await prisma.importJob.findFirst({
+  where: { source: "legacy_sales", status: "COMPLETED" },
+  orderBy: { snapshotDate: "desc" },
+});
+const lastSalesDate = lastSales?.snapshotDate;
+if (lastSalesDate && movementDate < lastSalesDate) {
+  throw new Error(`Este import tiene una fecha de ${movementDate} ...`);
+}
+```
+
+- SIN `snapshotDate` en el `where` (no se busca una fecha exacta como la
+  idempotencia, se busca entre todos). `orderBy snapshotDate desc` + `findFirst`
+  = toma el primero de la lista ordenada = el más nuevo. Truco general: para
+  "el máximo según un campo" en Prisma, `findFirst` + `orderBy desc`.
+- **Bug de signo cazado por Carlos leyendo en voz alta** (igual que el de
+  `quantityDelta`): la primera versión decía `lastSalesDate < movementDate`
+  ("si el último es menor que el entrante → antiguo"), que es al revés.
+  Probado con números (último 27/05, entrante 26/05): `27 < 26` es falso →
+  NO rechazaba el viejo. Corregido a `movementDate < lastSalesDate` ("si el
+  entrante es menor que el último → antiguo"). El `&&` con `lastSalesDate`
+  protege del null (corta antes de comparar si no hay último).
+- **Posición libre, elegida por legibilidad:** va después de la idempotencia.
+  Los dos chequeos son INDEPENDIENTES (ninguno necesita que el otro corra
+  primero; cualquiera que falle aborta antes de escribir nada), así que el
+  orden no cambia el resultado — se ponen juntos para que se lean como un
+  bloque de abortos. Distinción importante: la elección es de ESTILO, no de
+  dependencia.
+  **Cómo probar el rechazo sin esperar archivo viejo (truco registrado):**
+  para forzar que el VALIDADOR (no la idempotencia) agarre un archivo, se puede
+  editar en Prisma Studio el `snapshotDate` de un ImportJob a una fecha
+  POSTERIOR — así la idempotencia no lo encuentra por fecha exacta y el
+  no-regresivo lo caza. Es data sucia de prueba: revertir después. (No se usó:
+  Jesús pasó archivos reales del 24/05 y 28/05.) **Dato nuevo: Prisma Studio
+  permite EDITAR celdas sueltas, no solo mirar/borrar.**
+
+### Verificaciones (3 escenarios, todas pegaron a la predicción)
+
+- **Rechazo no-regresivo (24/05 contra 27/05 existente):** el validador agarró
+  el 24/05 (no la idempotencia, que no encontró 24/05 exacto). Mensaje nuevo
+  en pantalla con las dos fechas. CERO movements del 24/05; `/sales` siguió
+  mostrando solo 27/05. El throw cortó antes de `createImportJob`.
+- **Idempotencia (mismo 27/05):** ya conocida de sesiones previas; la
+  idempotencia corta ANTES de llegar al validador (throw del duplicado). No
+  ejercita el código nuevo — por eso no se re-probó, se saltó conscientemente.
+- **Happy path con día NUEVO (28/05):** primer éxito con un día genuinamente
+  no tocado. ImportJob 26 COMPLETED, **112 movements** (NO 102 — el 28/05 es
+  otro día con su propia cantidad de ventas; Carlos predijo bien que el número
+  podía diferir). `/sales` mostró 28/05 arriba, 27/05 abajo.
+  **Tres cosas verificadas en la prueba del 28/05 de una vez:**
+
+1. Happy path del importer con día nuevo (estrena la convención diaria real).
+2. **Paso 5 confirmado en flujo real:** tras el `POST`, el `GET /sales`
+   trajo el 28/05 SIN F5 — navegando alcanzó. Ayer no se pudo ver limpio por
+   el lío de pestañas; hoy sí. El revalidate hace su trabajo.
+3. **`orderBy: movementDate desc` ordenando de verdad por primera vez:** con
+   dos días en la tabla (27 y 28), el más nuevo sube. Antes, con todo en
+   27/05, el `desc` no tenía nada que desempatar.
+
+### Deuda chica
+
+- **Mensaje del validador imprime `Date` crudo.** `${movementDate}` y
+  `${lastSalesDate}` salen como `Sun May 24 2026 00:00:00 GMT-0600 (...)` en
+  vez de `dd/MM/yyyy`. Funciona pero es feo para Jesús. Fix: `format(date,
+"dd/MM/yyyy")` de date-fns. Carlos lo dejó consciente; visto en vivo en la
+  pantalla de error. Va con el polish visual post-MVP.
+- **El borrado del `console.log("Fecha de venta")`** (residuo del Paso 5, se
+  metió ayer y no se sacó al cerrar) quedó en el commit del validador, no en
+  el del Paso 5. Higiene de commits imperfecta, no se separó (ya estaba todo
+  junto; separar valía menos que seguir). Notado.
+
+### Estado al cierre
+
+Importer de ventas COMPLETO end-to-end: Pasos 1-6 cerrados + happy path con
+día nuevo + ambos caminos de error (idempotencia + no-regresivo) probados con
+archivos reales. Sin trabajo a medias. 2 commits de código de esta sesión
+(Paso 5, Paso 6) — confirmar si pusheados.
+
+**Del MVP sellado, queda UN bloque grande:**
+
+- **Importer de existencias con botón** — gemelo del de ventas, semanal.
+  Reusa el molde completo ya clavado: core reusable (workbook → resultado),
+  Server Action + upload, estados con discriminated union (`FormState`),
+  `revalidatePath` (de `/inventory` en vez de `/sales`), y el validador
+  no-regresivo (que comparará `snapshotDate` de existencias = fecha de
+  IMPRESIÓN del reporte, no Fecha Final como ventas). El salto técnico grande
+  (Server Actions) ya está dado; esto es clonar y ajustar diferencias.
+  Diferencia clave de fecha: ventas guarda Fecha Final (día de la venta);
+  existencias guarda la fecha de impresión del header (el reporte de
+  existencias no tiene campo de fecha de evento). El validador ya está
+  diseñado para esto vía el filtro por `source`.
+  **Deuda viva de antes (post-MVP):** columna de rotación en `/inventory`
+  (research previo: qué significa `ROTACION` del legacy); log "movements creados"
+  en existencias (cuenta tuplas, no movements); `snapshotDate` reusado para fecha
+  de venta (nombre); columnas huérfanas (deuda C); spinner de "procesando" para
+  imports lentos; productos no-zapato; devoluciones explícitas; segundo criterio
+  de orden ya hecho. Validación de TOT en ventas: DESCARTADA, no se reabre.
+  Operativo: convención de Detalle de Ventas diario con Jesús (en marcha — ya
+  pasó archivos de varios días).

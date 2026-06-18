@@ -3,6 +3,7 @@
 import * as XLSX from "xlsx";
 import type { ImportResult } from "./types";
 import { runVentasImport } from "@/scripts/import-ventas";
+import { revalidatePath } from "next/cache";
 
 export async function importVentas(formData: FormData): Promise<ImportResult> {
   const file = formData.get("file");
@@ -11,5 +12,6 @@ export async function importVentas(formData: FormData): Promise<ImportResult> {
   const bytes = await file.arrayBuffer();
   const workbook = XLSX.read(Buffer.from(bytes), { type: "buffer" });
   const result = await runVentasImport(workbook, file.name);
+  revalidatePath("/sales");
   return result;
 }

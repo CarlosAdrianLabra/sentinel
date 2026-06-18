@@ -268,7 +268,6 @@ export async function runVentasImport(
     // Header: fecha de venta
     const fechaFinalString = extractFechaFinalString(rows);
     const movementDate = parseFechaFinal(fechaFinalString);
-    console.log("Fecha de venta:", movementDate);
 
     // ── IDEMPOTENCIA (opción 3): ¿ya existe un import de ventas de esta fecha?
     const existing = await prisma.importJob.findFirst({
@@ -281,6 +280,21 @@ export async function runVentasImport(
     if (existing) {
       throw new Error(
         `Ya existe un import de ventas COMPLETED para ${fechaFinalString} (ImportJob ${existing.id}). Abortando para no duplicar.`,
+      );
+    }
+    const lastSales = await prisma.importJob.findFirst({
+      where: {
+        source: "legacy_sales",
+        status: "COMPLETED",
+      },
+      orderBy: {
+        snapshotDate: "desc",
+      },
+    });
+    const lastSalesDate = lastSales?.snapshotDate;
+    if (lastSalesDate && movementDate < lastSalesDate) {
+      throw new Error(
+        `Este import tiene una fecha de ${movementDate} y la fecha del import mas nuevo es de ${lastSalesDate} por lo tanto este import es antiguo`,
       );
     }
 

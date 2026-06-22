@@ -4,6 +4,7 @@ import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../generated/prisma/client";
 import { parse } from "date-fns";
 import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
 
 const adapter = new PrismaBetterSqlite3({
   url: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
@@ -165,7 +166,8 @@ function getFilePathFromArgs(): string {
 }
 
 function readWorkbook(filePath: string) {
-  return XLSX.readFile(filePath);
+  const buffer = readFileSync(filePath);
+  return XLSX.read(buffer, { type: "buffer" });
 }
 
 function selectDataSheet(workbook: XLSX.WorkBook): string {

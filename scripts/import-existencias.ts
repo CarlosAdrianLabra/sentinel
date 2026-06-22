@@ -1,8 +1,10 @@
-import XLSX from "xlsx";
+import * as XLSX from "xlsx";
 import { z } from "zod";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../generated/prisma/client";
 import { parse } from "date-fns";
+import { pathToFileURL } from "url";
+import { readFileSync } from "node:fs";
 
 const adapter = new PrismaBetterSqlite3({
   url: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
@@ -28,7 +30,8 @@ function getFilePathFromArgs(): string {
 }
 
 function readWorkbook(filePath: string) {
-  return XLSX.readFile(filePath);
+  const buffer = readFileSync(filePath);
+  return XLSX.read(buffer, { type: "buffer" });
 }
 
 function selectDataSheet(workbook: XLSX.WorkBook): string {
@@ -186,14 +189,14 @@ async function buildBranchMap(): Promise<Record<string, number>> {
 }
 
 async function createImportJob(
-  filePath: string,
+  fileName: string,
   snapshotDate: Date,
 ): Promise<number> {
   const job = await prisma.importJob.create({
     data: {
       source: "legacy_inventory",
       status: "RUNNING",
-      fileName: filePath,
+      fileName: fileName,
       startedAt: new Date(),
       snapshotDate: snapshotDate,
     },
@@ -294,35 +297,44 @@ async function persistTuples(
   return processedCount;
 }
 
-async function main(): Promise<void> {
-  const filePath = getFilePathFromArgs();
+type ExistenciasImportResult = {
+  importJobId: number;
+  processedCount: number;
+};
+
+export async function runExistenciasImport(
+  workbook: XLSX.WorkBook,
+  fileName: string,
+): Promise<ExistenciasImportResult> {
   let importJobId: number | undefined;
   try {
-    console.time("total");
-    console.log("Archivo recibido:", filePath);
-    const workbook = readWorkbook(filePath);
-    console.log("Hojas encontradas:", workbook.SheetNames);
     const sheetName = selectDataSheet(workbook);
-    console.log("Hoja de datos:", sheetName);
     const sheet = workbook.Sheets[sheetName];
-
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
+
     const snapshotDateString = extractSnapshotDate(rows);
-    console.log("Fecha del snapshot:", snapshotDateString);
+    const snapshotDate = parseSnapshotDate(snapshotDateString);
+
+    // Validador no-regresivo: rechaza un snapshot más viejo que el último importado.
+    const lastInventory = await prisma.importJob.findFirst({
+      where: { source: "legacy_inventory", status: "COMPLETED" },
+      orderBy: { snapshotDate: "desc" },
+    });
+    const lastInventoryDate = lastInventory?.snapshotDate;
+    if (lastInventoryDate && snapshotDate < lastInventoryDate) {
+      throw new Error(
+        `Este import es del ${snapshotDate}, más viejo que el último (${lastInventoryDate}). Rechazado.`,
+      );
+    }
 
     const rawTuples = parseProducts(rows);
     const tuples = validateTuples(rawTuples);
 
     const branchMap = await buildBranchMap();
-    console.log("Mapa de branches (legacyStoreId → id):", branchMap);
 
-    const snapshotDate = parseSnapshotDate(snapshotDateString);
-    importJobId = await createImportJob(filePath, snapshotDate);
-    console.log(`ImportJob creado con id ${importJobId}`);
-
+    importJobId = await createImportJob(fileName, snapshotDate);
     const processedCount = await persistTuples(tuples, branchMap, importJobId);
 
-    // Marcar ImportJob como COMPLETED
     await prisma.importJob.update({
       where: { id: importJobId },
       data: {
@@ -333,48 +345,34 @@ async function main(): Promise<void> {
       },
     });
 
-    console.log(
-      `Import completado. ImportJob ${importJobId} marcado como COMPLETED.`,
-    );
-    console.log(`Productos/posiciones/movements creados: ${processedCount}`);
-
-    const totalPares = tuples.reduce((sum, t) => sum + t.quantity, 0);
-    console.log(`Suma de quantity en tuplas: ${totalPares}`);
-    console.log(`\nPrimera tupla:`, tuples[0]);
-    console.log(`Última tupla:`, tuples[tuples.length - 1]);
+    return { importJobId, processedCount };
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      console.error("Error de validacion de tuplas:");
-      for (const issue of error.issues) {
-        console.error(` - tupla ${issue.path.join(".")}: ${issue.message}`);
-      }
-    } else if (importJobId !== undefined) {
-      console.error(
-        "Error durante la persistencia:",
-        error instanceof Error ? error.message : error,
-      );
-    } else {
-      console.error(
-        "Error antes de crear el ImportJob:",
-        error instanceof Error ? error.message : error,
-      );
-    }
-
     if (importJobId !== undefined) {
       await markImportJobFailed(importJobId, error);
-      console.error(`ImportJob ${importJobId} marcado como FAILED.`);
     }
-
     throw error;
   }
 }
 
-main()
-  .catch((error) => {
-    console.error("Error fatal:", error);
-    process.exit(1);
-  })
-  .finally(async () => {
-    console.timeEnd("total");
-    await prisma.$disconnect();
-  });
+async function main(): Promise<void> {
+  const filePath = getFilePathFromArgs();
+  console.time("total");
+  console.log("Archivo recibido:", filePath);
+  const workbook = readWorkbook(filePath);
+  const result = await runExistenciasImport(workbook, filePath);
+  console.log(
+    `import de existencias completado. ImportJob ${result.importJobId}`,
+  );
+  console.log(`Tuplas procesadas: ${result.processedCount}`);
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href)
+  main()
+    .catch((error) => {
+      console.error("Error fatal:", error);
+      process.exit(1);
+    })
+    .finally(async () => {
+      console.timeEnd("total");
+      await prisma.$disconnect();
+    });

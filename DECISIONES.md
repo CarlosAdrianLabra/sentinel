@@ -1725,3 +1725,223 @@ archivos reales. Sin trabajo a medias. 2 commits de código de esta sesión
   de orden ya hecho. Validación de TOT en ventas: DESCARTADA, no se reabre.
   Operativo: convención de Detalle de Ventas diario con Jesús (en marcha — ya
   pasó archivos de varios días).
+
+## ACTUALIZACIÓN SESIÓN 2026-06-22
+
+### Importer de existencias con botón — COMPLETO. Último bloque del MVP sellado.
+
+Construido el gemelo del importer de ventas para existencias: Server Action +
+upload + estados con discriminated union + `revalidatePath` + validador
+no-regresivo. El salto técnico grande (Server Actions) ya estaba dado en
+ventas; esto fue clonar el molde y ajustar las diferencias. 4 commits de código
+separados por responsabilidad.
+
+### Refactor del parser de existencias a core reusable
+
+`scripts/import-existencias.ts`: extraído `runExistenciasImport(workbook,
+fileName): Promise<ExistenciasImportResult>` del `main()`, idéntico molde al
+Paso 2 de ventas. El core recibe el **workbook** (lo primero que ambos
+llamadores producen), no la ruta (solo CLI) ni los bytes (solo action), y
+**devuelve** `{ importJobId, processedCount }` en vez de imprimir. `main()`
+adelgazó a argv → `readWorkbook` → core → imprimir. `createImportJob` renombró
+`filePath → fileName`.
+
+- **Guard `import.meta.url`** agregado (= Paso 3 de ventas): el
+  `main().catch().finally()` estaba suelto al nivel del módulo y se
+  autoejecutaría apenas la action hiciera `import` → reventaría con "falta el
+  argumento" (no hay `process.argv[2]` en el server). Envuelto en
+  `if (import.meta.url === pathToFileURL(process.argv[1]).href)`.
+
+### Bug `XLSX.readFile is not a function` — y el mismo bug latente en ventas
+
+Al correr la CLY tras cambiar a `import * as XLSX` (namespace, por Turbopack),
+`readWorkbook` tronó: `XLSX.readFile is not a function`.
+
+- **Causa:** `readFile` lee de **disco** (necesita `fs`), así que el módulo
+  "core" de `xlsx` que trae el namespace import —pensado también para
+  browser/bundler, donde no hay disco— **no lo incluye** → `undefined`. Lo que
+  sí trae siempre es `XLSX.read` (parser en memoria, sobre bytes), el mismo que
+  usa la action.
+- **Fix:** `readWorkbook` pasa a `readFileSync(filePath)` →
+  `XLSX.read(buffer, { type: "buffer" })`. Esto le da coherencia total al
+  diseño: **disco → bytes → `XLSX.read`** en CLI, **upload → bytes →
+  `XLSX.read`** en action. Los dos lados pasan por bytes; `readFile` era el
+  único que leía "mágico" del disco, y ya no está disponible con el namespace.
+- **Aprendizaje general:** si un build/runtime error aparece solo bajo el
+  namespace import (o solo bajo Turbopack) pero andaba con el default import (o
+  con `tsx`), sospechar qué partes del paquete se incluyen en el build de
+  browser vs node. `readFile` es node-only; `read`/`utils`/`WorkBook` están en
+  ambos.
+- **Ventas tenía el MISMO bug latente:** su `readWorkbook` también usaba
+  `XLSX.readFile`. No había mordido porque ventas, tras el Paso 3, solo se
+  corre por **navegador** (que usa `XLSX.read` sobre bytes y nunca toca
+  `readFile`); la CLI de ventas se hubiera roto igual. Emparejado en un commit
+  `fix` separado. Los dos parsers quedaron gemelos: namespace import +
+  `readFileSync` → `XLSX.read`.
+
+### Validador no-regresivo en existencias
+
+Misma forma EXACTA que el de ventas (`findFirst` + `orderBy: { snapshotDate:
+"desc" }`, comparación con `<` estricto, `&&` que protege del null). Slotea
+antes de `createImportJob`, así un archivo rechazado no deja un job RUNNING
+colgado. Lo único que cambia es el `source` → `legacy_inventory`.
+
+- **Diferencia de fecha vs ventas:** existencias compara la fecha de
+  **IMPRESIÓN** del header (`Impresión: DD/MM/YYYY HH:MM`, vía
+  `extractSnapshotDate`/`parseSnapshotDate`), no Fecha Final. El reporte de
+  existencias no tiene fecha de evento; su tiempo es el de la impresión del
+  snapshot. El validador ya estaba diseñado para esto vía el filtro por
+  `source` (compara existencias contra existencias, nunca peras con manzanas).
+- **Dirección de la comparación (bug de signo, cazado leyendo en voz alta como
+  en ventas):** `snapshotDate < lastInventoryDate → throw` ("si el entrante es
+  más viejo que el último → rechaza"). Verificado con números: entrante 22/05,
+  último 29/05 → `22 < 29` verdadero → tira. Caso bueno: 30/05 → `30 < 29`
+  falso → pasa. Mismo día: `29 < 29` falso → pasa (lo deja pasar a propósito,
+  el delta 0 lo hace inofensivo).
+
+### Idempotencia explícita: NO en existencias (decisión consciente)
+
+Existencias **no** lleva el chequeo de idempotencia que sí tiene ventas.
+
+- **Razón — idempotencia natural del delta:** en `persistTuples`, re-subir el
+  mismo snapshot da `delta = tuple.quantity - previousQuantity` = mismo − mismo
+  = **0** en cada tupla, y el `if (delta !== 0)` no crea movement. Cero
+  movements; las posiciones se upsertean a los mismos valores. La red ya está
+  integrada en el delta. Ventas crea OUTs sin comparar contra nada → por eso
+  allá hizo falta el chequeo explícito; acá no.
+- **Deuda consciente aceptada (no descuido):** re-subir el mismo snapshot crea
+  un ImportJob COMPLETED **redundante** con 0 movements. Una fila de auditoría
+  de más, nada roto. El día que moleste, ahí se agrega idempotencia; hoy no
+  hace falta.
+- El `<` estricto del validador (no `<=`) es coherente: deja pasar igual-o-más-
+  nuevo. Un snapshot más nuevo del mismo día (Jesús regeneró el reporte a la
+  tarde) DEBE actualizar posiciones; un re-run idéntico es inofensivo. Con
+  `<=` se bloquearía el re-run, metiendo el validador a hacer de anti-
+  duplicado — justo lo que el 18 se decidió no mezclar.
+
+### Carpeta `app/imports/existencias/` (gemelo de ventas)
+
+Cuatro archivos calcados de `app/imports/ventas/`. Diferencias reales vs
+ventas (lo que no se puede copiar a ciegas entre gemelos):
+
+- `actions.ts`: llama `runExistenciasImport`, y `revalidatePath("/inventory")`
+  — la vista que **muestra** el stock, no `/sales`.
+- `import-form.tsx`: texto de éxito **"Tuplas procesadas"**, no "movements
+  creados". En existencias `processedCount` son tuplas, NO movements (mismo
+  snapshot → 9660 tuplas, 0 movements). En ventas SÍ son movements (cada tupla
+  es un OUT), así que el texto de ventas que dice "movements" está bien. Misma
+  mentira del log del parser, evitada en la UI.
+- `types.ts`, `page.tsx`: idénticos salvo nombres.
+- **Bug evitado — `revalidatePath("/existencias")`:** primera versión apuntaba
+  a una ruta que **no existe** (no hay `app/existencias/`; la vista de stock es
+  `app/inventory/`). El revalidate **no tira error** con ruta inexistente —
+  refrescaría la nada en silencio, y `/inventory` mostraría datos viejos hasta
+  un F5 manual sin avisar. Corregido a `/inventory`.
+- **Distinción clavada:** `/imports/existencias` = página donde se **sube** el
+  archivo (form). `/inventory` = página donde se **ve** el stock (tabla). Rutas
+  separadas; el revalidate apunta a la de la vista, no a la del form.
+
+### Deuda matada: log "movements creados" en existencias
+
+La deuda viva "log que cuenta tuplas, no movements" del `main()` viejo de
+existencias **dejó de existir** esta sesión: al mover el cuerpo al core (que
+devuelve en vez de loguear) y poner la etiqueta honesta `Tuplas procesadas:` en
+el `main()` nuevo, el log mentiroso desapareció. Una menos en la lista.
+
+### Límite de body de Server Actions: 1 MB → 10 MB
+
+Al subir existencias por navegador: `Error: Body exceeded 1 MB limit`
+(`statusCode: 413`). Las Server Actions de Next tienen tope default de **1 MB**
+en el body. El archivo de existencias multi-sucursal pesa **2.25 MB** → se
+pasa. Ventas nunca lo pisó (archivo de un día, < 1 MB) — primera vez que se
+sube un archivo grande por navegador.
+
+- **No es bug de código** — parser, action y form estaban bien. Es config de
+  Next que hay que levantar.
+- **Fix (`next.config.ts`):**
+
+```typescript
+const nextConfig: NextConfig = {
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "10mb",
+    },
+  },
+};
+```
+
+Valor es string con unidad (`"10mb"`, no `10`). Anidado en `experimental` en
+Next 16. Puesto en 10mb (no justo en 3) para dar aire al crecimiento del
+catálogo sin ser infinito.
+
+- **Requiere reiniciar el dev server** — la config no recarga en caliente.
+- **Aprendizaje:** el 413 muere en la capa HTTP de Next **antes** de que corra
+  el código → `runExistenciasImport` nunca se ejecuta, `createImportJob` nunca
+  se llama, **no quema id de autoincrement**. Distinto del borrado manual de
+  ImportJobs (donde el INSERT sí había pasado, por eso el id quedaba quemado).
+  El autoincrement de SQLite solo avanza cuando un INSERT realmente ocurre.
+
+### Performance: 41 segundos por import
+
+El import por navegador tardó **41s** (`application-code: 41s`): parseo de 4594
+productos + 9660 upserts de posición. Consecuencias:
+
+- El estado `procesando` que en ventas era un parpadeo invisible, en
+  existencias **se ve 40 segundos**. Esto le da peso real a la deuda del
+  spinner (en ventas era cosmética; acá el usuario se queda mirando). Sigue
+  post-MVP, pero ahora importa de verdad.
+- **Doble-submit más probable:** 40s es tiempo de sobra para que Jesús piense
+  "no pasó nada" y reintente. La idempotencia natural lo salva de romper datos,
+  pero refuerza por qué deshabilitar el botón mientras `status ===
+"procesando"` pesa más acá que en ventas.
+- **Tolerable para el MVP** — 41s una vez por semana está bien. Solo medido.
+
+### Verificaciones
+
+- **CLI** (`pnpm tsx scripts/import-existencias.ts ...`): ImportJob 27
+  COMPLETED, 9660 tuplas, **0 movements** (`referenceId="27"` → 0 filas). El
+  validador pasó (`29 < 29` falso).
+- **Navegador** (`/imports/existencias`): ImportJob 28 COMPLETED, 9660 tuplas,
+  **0 movements** (`referenceId="28"` → 0 filas), pantalla en rama `exito`
+  ("Import Ok - ImportJob 28, 9660 Tuplas procesadas").
+- Ambas corridas sobre el **mismo snapshot ya cargado** → 0 movements
+  (idempotencia natural demostrada dos veces). "Éxito" acá = "el import corrió
+  completo sin errores", NO "entró stock nuevo" — las dos cosas conviven.
+- **Pendiente de verificación:** el importer haciendo algo **visible**
+  (movements ≠ 0) requiere un snapshot **más nuevo** con stock distinto, que
+  hoy no existe (el legacy tendría que regenerar el reporte otro día). Anotado
+  igual que el día-nuevo de ventas en su momento.
+
+### Estado al cierre — MVP sellado COMPLETO en código
+
+El MVP definido en la sesión 2026-06-16 quedó **completo en código**:
+
+- ✓ **Importer de ventas con botón** (Pasos 1-6, sesiones previas).
+- ✓ **Importer de existencias con botón** (esta sesión).
+- ✓ **Vistas `/inventory` y `/sales`** (ya vivían).
+
+Los dos flujos de subida (ventas diario, existencias semanal) + las dos vistas.
+El día 1 de Jesús —sube ventas, sube existencias, mira stock y mira ventas, sin
+llamar a Carlos— está cubierto.
+
+**Commits de la sesión (4 de código, pusheados):**
+
+- `fb599b3 feat(imports): core reusable runExistenciasImport + validador no-regresivo`
+- `223e1ff fix(imports): readWorkbook de ventas lee bytes en vez de XLSX.readFile`
+- `0e63ea7 feat(imports): importer de existencias con boton (carpeta completa)`
+- `b3c215d chore(config): sube bodySizeLimit de Server Actions a 10mb para existencias`
+
+**Pendientes post-MVP (deuda viva):**
+
+- **Polish visual / spinner** — ahora con peso real (41s de "procesando"
+  visible en existencias). Deshabilitar el botón mientras `status ===
+"procesando"`, estados bonitos con feedback.
+- **Mensaje del validador imprime `Date` crudo** — en AMBOS parsers
+  (`${snapshotDate}`, `${movementDate}`). Fix: `format(date, "dd/MM/yyyy")`.
+- **Verificación con dato real:** importer de existencias con un snapshot nuevo
+  (movements ≠ 0); happy path de ventas con día nuevo de Jesús (en marcha).
+- **Operativo:** convención con Jesús — existencias semanal + ventas diario.
+- Deuda chica de antes: columna de rotación en `/inventory` (research previo:
+  qué significa `ROTACION` del legacy); `snapshotDate` reusado para fecha de
+  venta (nombre); columnas huérfanas (deuda C); productos no-zapato;
+  devoluciones explícitas (`DEV.`/`IMP. DEV.`).

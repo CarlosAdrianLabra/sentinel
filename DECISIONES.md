@@ -1945,3 +1945,118 @@ llamar a Carlos— está cubierto.
   qué significa `ROTACION` del legacy); `snapshotDate` reusado para fecha de
   venta (nombre); columnas huérfanas (deuda C); productos no-zapato;
   devoluciones explícitas (`DEV.`/`IMP. DEV.`).
+
+## ACTUALIZACIÓN SESIÓN 2026-06-23 (scope — mapa de pantallas y usuarios, pre-navegación)
+
+Sesión de scope/diseño, NO de código. Con el MVP cerrado en código (sesión
+2026-06-22), el foco cambió de "tubería" (parsers, imports) a "producto": qué
+pantallas hacen a Sentinel usable para sus dos usuarios reales. Se cerró el
+**mapa completo de pantallas** y el **reparto por usuario**, como paso previo a
+diseñar el esqueleto de navegación. Auth/permisos: diferidos conscientemente.
+
+### El cambio de fase: de tubería a producto
+
+Con la data entrando y guardándose bien (los dos importers + las dos vistas), la
+pregunta dejó de ser técnica. Lo que sigue es hacer la app **usable** — UX y
+navegación, no parsing. Distinción de método sellada: primero **diseñar el mapa**
+(qué pantallas, cómo se agrupan, quién ve qué) — cero código — y recién después
+construir layout/menú/rutas. Construir pasillos antes de saber qué cuartos hay es
+el error a evitar.
+
+### Los dos usuarios (perfiles afinados esta sesión)
+
+- **Jesús — operador.** Vive en el DETALLE y ALIMENTA el sistema. Sube los
+  archivos (ventas diario, existencias semanal) y consulta. Necesita operar el
+  inventario y detectar descuadres ("que no se roben nada").
+- **Tío — dueño, mobile, SOLO lectura.** Vive en el RESUMEN y solo MIRA. No sube
+  nada. Es quien hace los pedidos a proveedores (Charly, Nike, Adidas...).
+  Necesita entender el negocio de un vistazo desde el celular. (Confirmado
+  hablando con él esta sesión — es el usuario que más va a usar el programa, su
+  experiencia pesa.)
+
+Las dos necesidades casi no se pisan: detalle+alimentar vs resumen+mirar. Esa
+separación limpia es la que define la navegación.
+
+### Capacidad nueva, la más valiosa del proyecto: "cuándo resurtir"
+
+El tío pidió ver **cuándo un zapato se va a acabar**, para decidir cuándo
+resurtir. NO es una pantalla más — es una capacidad que **el legacy NO tiene** y
+que hoy el tío resuelve adivinando a mano. Mueve plata real: es lo que le dice
+qué pedirle a cada proveedor.
+
+- **El dato ya existe entero:** stock actual (`InventoryPosition`) + ritmo de
+  venta (movements `OUT` que ahora se importan). "Se va a acabar" = poco stock +
+  sale rápido.
+- **Es la columna de ROTACIÓN diferida, con otro nombre.** "Rotación" y "cuándo
+  resurtir" son la misma pregunta. Lo fichado como deuda post-MVP resulta ser la
+  feature estrella del dashboard del tío.
+- Si algo justifica que Sentinel exista más allá de "una vista más linda del
+  legacy", es esto.
+
+### Mapa completo de pantallas (cerrado)
+
+**Ya viven:**
+
+- `/imports/ventas` — subir ventas
+- `/imports/existencias` — subir existencias
+- `/sales` — tabla de ventas
+- `/inventory` — tabla de stock actual
+
+**Nuevas (TODAS leen data que ya está en la DB — cero tubería nueva):**
+
+- **Historial de movimientos** — qué entró / qué salió por SKU, filtrable. Vista
+  calcada de `/sales` pero mostrando TODOS los movements (ventas `OUT` + ajustes
+  `IMPORT_SET`), no solo ventas. Sirve doble: operar Y detectar mermas (vendiste
+  3 pero el stock bajó 5 → faltan 2). **Para Jesús.**
+- **Dashboard del tío** (mobile-first, lectura). Dos cosas adentro:
+  - **Más vendidos / ranking** — `groupBy` producto sobre los `OUT`, suma de
+    cantidades, ordenado. Acotado a **histórico total** por ahora (no por
+    período, no tendencia — más caros, post-MVP).
+  - **Qué se va a acabar / cuándo resurtir** — la estrella (ver arriba).
+- **Filtros** en las tablas que ya existen — mejora a `/sales` e `/inventory`
+  (por sucursal/fecha/producto), NO una pantalla nueva. Reusa el patrón
+  URL-as-state + debounce de la búsqueda de `/inventory`.
+
+### Reparto por usuario
+
+- **Jesús (operador):** subir ventas, subir existencias, ver inventario, ver
+  ventas, historial de movimientos.
+- **Tío (dueño, mobile):** dashboard de lectura (más vendidos + cuándo resurtir).
+
+### Auth / permisos: DIFERIDOS conscientemente (no descuido)
+
+Decisión: **una sola puerta para todos**, permisos por rol DESPUÉS.
+
+- Auth estaba **explícitamente fuera del MVP** (stack: "no auth compleja").
+  Meterlo ahora reabre esa decisión — se reabre y se vuelve a cerrar a
+  propósito: sigue fuera de este bloque.
+- **Sutileza de secuencia:** "permisos por rol" necesita saber quién es el
+  usuario → necesita auth. PERO el esqueleto de navegación y las pantallas NO la
+  necesitan. Se construye todo con **todo visible para todos** primero; auth +
+  permisos entran como **capa separada después**. El día que se ponga, lo único
+  que cambia es QUÉ pantallas le aparecen a quién, no las pantallas en sí.
+- Razón de orden: auth es un subsistema entero (login, sesiones, tabla de
+  usuarios, middleware). Diferirlo deja avanzar en lo visible/usable sin
+  frenarse. ("Ahorita no veo que sea un stopper".)
+
+### Estado al cierre — mapa cerrado, navegación pendiente
+
+Cerrado: el universo de pantallas y a quién sirve cada una. Con auth diferido,
+todas cuelgan de una sola puerta.
+
+**Para la PRÓXIMA sesión (conversación aparte):**
+
+1. **Diseñar el árbol de navegación** — cómo se AGRUPAN estas pantallas en un
+   menú (¿planas en sidebar? ¿agrupadas por tipo: acciones / consultas /
+   dashboard?), cómo se llega de una a otra. Sigue siendo DISEÑO, cero código.
+2. **Recién después: construir el layout** en Next (menú, rutas, componente de
+   navegación).
+
+Tipos a agrupar: **acciones** (subir archivos), **tablas de consulta** (ventas,
+inventario, movimientos), **dashboard** (tío). La primera pregunta de la próxima
+sesión es cómo juntarlas para que quien entra encuentre lo que busca.
+
+**Sobre construir el esqueleto:** no toda pantalla candidata tiene que entrar al
+primer menú. Puede nacer con las 4 que ya existen + huecos reservados para las
+nuevas, llenándolos de a poco. Evitar el menú inflado de pantallas a medio
+construir.

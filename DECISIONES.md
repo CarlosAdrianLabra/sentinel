@@ -2060,3 +2060,97 @@ sesión es cómo juntarlas para que quien entra encuentre lo que busca.
 primer menú. Puede nacer con las 4 que ya existen + huecos reservados para las
 nuevas, llenándolos de a poco. Evitar el menú inflado de pantallas a medio
 construir.
+
+## ACTUALIZACIÓN SESIÓN 2026-06-23 (cont. — árbol de navegación cerrado, pre-layout)
+
+Continuación del mismo día. Cerrado el scope de pantallas (entrada anterior),
+esta vuelta cerró el **árbol de navegación**: cómo se agrupan las pantallas en
+un menú y dónde cae cada usuario. Sigue siendo DISEÑO, cero código. Lo próximo
+sí es construir el layout en Next.
+
+### Árbol de navegación (cerrado)
+
+- **Landing (todos):** Dashboard.
+- **Acciones:** subir ventas · subir existencias.
+- **Consultas:** ventas (`/sales`) · inventario (`/inventory`) · movimientos
+  (historial, nuevo).
+- **Navegación:** sidebar en PC, hamburguesa en cel (patrones estándar
+  responsive; son los correctos para este caso).
+
+### Agrupar por tipo ≈ agrupar por usuario (lo que el reparto destapó)
+
+Los tres grupos son nominalmente "por tipo" (acciones / consultas / dashboard),
+pero el reparto en realidad parte por **usuario**:
+
+- **Acciones + Consultas = Jesús.** Escribir (subir archivos) + leer el detalle
+  (las tres tablas). Su mundo se parte en dos ramas.
+- **Dashboard = tío.** Leer el resumen. Una sola rama.
+
+Casi coinciden los dos criterios; la única asimetría es que el mundo de Jesús se
+abre en dos y el del tío es uno solo.
+
+### "Filtros" NO es pantalla (que no se cuele al menú)
+
+Los filtros por sucursal/fecha/producto son una **mejora a las tablas que ya
+existen** (mismo patrón URL-as-state + debounce de la búsqueda de `/inventory`),
+NO un ítem de menú propio. No va como cuarta consulta. Fichado para no
+re-litigarlo.
+
+### Landing única para todos = única opción coherente DADO el no-auth (núcleo)
+
+La decisión "la app siempre abre en el Dashboard" no es el atajo cómodo — es la
+**única** opción coherente dada la decisión previa de diferir auth. Razón: sin
+login, **la app no sabe quién entró**, no puede distinguir al tío de Jesús. Una
+landing personalizada por usuario es literalmente imposible de hacer bien sin
+saber quién es, y eso requiere el auth que se difirió. Una sola puerta + una
+sola landing no es comodidad: es lo que el no-auth obliga.
+
+Consecuencia conceptual: jubila la pregunta "¿qué ve Jesús al entrar?" como
+problema de routing. No hay forma de mandar a uno a un lado y al otro a otro sin
+saber cuál es cuál. La pregunta deja de existir hasta que haya auth.
+
+### Routing por dispositivo: considerado y DESCARTADO
+
+Tentación intermedia: como el aparato casi delata al usuario (tío =
+mobile/lectura/dashboard; Jesús = PC, porque sube los Excel que exporta del
+legacy = trabajo de escritorio), se podría rutear por dispositivo (cel →
+dashboard directo, PC → menú). **No se construye.** Agrega lógica frágil para
+esquivar algo que igual no se resuelve sin auth, y el peor caso de NO hacerlo es
+inofensivo: alguien cae en la pantalla "equivocada" y da un clic, nada se rompe.
+Mismo espíritu que "saber qué NO construir".
+
+(Pendiente de confirmar con Carlos: que Jesús opera desde PC — inferido del flujo
+de subir archivos, no confirmado explícito.)
+
+### Deuda chica / fichado consciente
+
+- **La acción más frecuente de Jesús —subir el archivo del día— queda a un clic
+  de la landing, no ES la landing.** Aceptable: un clic es nada, y el Dashboard
+  no es pantalla inútil para él (le da contexto de qué se está moviendo al
+  entrar). Decisión consciente, no accidente. Si algún día molesta, se
+  reconsidera.
+
+### Estado al cierre — árbol cerrado, layout pendiente
+
+Cerrado: cómo se agrupan las pantallas, dónde cae cada usuario, navegación
+responsive. Con auth diferido, todo cuelga de una sola puerta con landing en
+Dashboard.
+
+**Pantallas que YA viven:** `/sales`, `/inventory`, `/imports/ventas`,
+`/imports/existencias`.
+**Faltan construir:** historial de movimientos (consulta nueva para Jesús —
+vista calcada de `/sales` pero con TODOS los movements, `OUT` + `IMPORT_SET`, no
+solo ventas); dashboard del tío (más vendidos + "cuándo resurtir" = la columna
+de rotación con otro nombre, la feature estrella).
+
+**Recordatorio del scope previo:** no toda pantalla candidata entra al primer
+menú. El esqueleto puede nacer con las 4 que ya existen + huecos para las
+nuevas, llenándolos de a poco. Evitar el menú inflado de pantallas a medio
+construir.
+
+**Próximo bloque (ya es código):** construir el layout en Next — componente de
+navegación (sidebar PC + hamburguesa cel), rutas, el shell que envuelve las
+pantallas. Ahí entra la **skill de frontend-design** (ya disponible en el
+entorno, nada que instalar; aplica a la fase visual). Nota de la sesión: esa
+skill pesa más en el dashboard del tío (mobile, lectura, el showcase que
+justifica el proyecto) que en las tablas utilitarias de Jesús.

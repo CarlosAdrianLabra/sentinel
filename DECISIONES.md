@@ -2154,3 +2154,56 @@ pantallas. Ahí entra la **skill de frontend-design** (ya disponible en el
 entorno, nada que instalar; aplica a la fase visual). Nota de la sesión: esa
 skill pesa más en el dashboard del tío (mobile, lectura, el showcase que
 justifica el proyecto) que en las tablas utilitarias de Jesús.
+
+## ACTUALIZACIÓN SESIÓN 2026-06-24 (dirección visual elegida — pre-layout)
+
+Sesión de diseño visual, cero código. Con el árbol de navegación cerrado, se
+eligió la **dirección visual** del shell antes de construirlo. Claude exploró 4
+rumbos como mockups desechables (HTML suelto, NO tocan el repo) — elegir estética
+se hace viéndola, no prediciendo; por eso acá Claude produjo todo. El código que
+lleve el ganador al Next vuelve al contrato pedagógico de siempre.
+
+### Los 4 rumbos explorados
+
+Mismo contenido en los 4 (mismos KPIs, misma feature estrella "cuándo resurtir") y
+el MISMO árbol de navegación — solo cambia la piel. Todos esquivan a propósito los
+clichés de diseño autogenerado.
+
+1. **Piso y caja** — claro, cálido, colores de marca (rojo+azul), tarjetas tipo
+   etiqueta de caja, corrida de tallas como motivo.
+2. **Consola Sentinel** — oscuro, sala de monitoreo, barras de salud de stock +
+   franja de vigilancia (frescura del dato + alertas).
+3. **Reporte vivo** — claro, editorial, tipografía grande; "cuándo resurtir" como
+   número gigante con barra de agotamiento.
+4. **Modo Centinela** — homenaje atmosférico al sci-fi de targeting (HUD
+   púrpura/magenta, retícula de mira, lenguaje de detección). El centinela escanea
+   el inventario y "bloquea" lo que va a agotarse.
+
+### ELEGIDO: Rumbo 4 — "Modo Centinela"
+
+Razón de PRODUCTO, no solo gusto: **el tío (usuario showcase, dueño, mobile) es
+fan de los cómics y de X‑Men.** El Easter egg aterriza con el usuario real — para
+él lo "cool" ES lo útil; el guiño lo va a disfrutar. Da vuelta la duda previa
+("¿más cool que útil para el tío?"): para ESTE tío en concreto, suma.
+
+- **Homenaje por atmósfera, NO por IP.** Sin arte, robots, logos ni nombres de
+  Marvel/X‑Men. La referencia es paleta + HUD + lenguaje de detección. El nombre
+  "Sentinel" ya era de Carlos (palabra de diccionario, predate el guiño) → el
+  nombre mismo hace el wink; quien conoce lo cacha, quien no ve un dashboard de
+  vigilancia normal. Eso lo mantiene Easter egg y no copia. Sostener esta línea al
+  construir.
+- **Tokens del rumbo:** fondo púrpura‑void, acentos púrpura (#9D5CFF) + magenta
+  (#FF2E88) + cyan de readout (#39DBFF), estados ok/low/crit. Tipos: Orbitron
+  (display/marca/números), Chakra Petch (UI), Share Tech Mono (readouts).
+  Animación sutil (pulso + barrido) con `prefers-reduced-motion` respetado.
+- **Posible split de piel por zona (ABIERTO, no decidido):** Centinela full en la
+  consola del operador (Jesús, PC); evaluar si el dashboard del tío queda Centinela
+  completo o una variante más limpia. El árbol es el mismo; la piel puede variar por
+  zona. Se decide al ver el mobile real.
+
+### Próximo bloque (ya es código)
+
+Shell de navegación en Next: dónde vive el layout persistente (App Router), sidebar
+PC + hamburguesa cel, rutas, tokens del rumbo 4 en los estilos globales. Entra la
+skill de frontend-design. Antes de escribir: ver los archivos actuales (root layout,
+estilos globales, config de Tailwind/fuentes) — principio de verificar contra la realidad.

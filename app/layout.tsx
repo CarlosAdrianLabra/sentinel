@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Sidebar } from "@/components/sidebar";
 import {
   Geist,
   Geist_Mono,
@@ -53,7 +54,10 @@ export default function RootLayout({
       lang="es" // ← era "en"
       className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} ${chakraPetch.variable} ${shareTechMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex">
+        <Sidebar />
+        <main className="flex-1 overflow-auto">{children}</main>
+      </body>
     </html>
   );
 }

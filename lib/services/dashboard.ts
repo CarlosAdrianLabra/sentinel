@@ -36,3 +36,29 @@ export async function getDashboardKpis() {
     ventasUltimoDia,
   };
 }
+
+export async function getTopSellers() {
+  const grupos = await prisma.inventoryMovement.groupBy({
+    by: ["productId"],
+    where: { movementType: "OUT" },
+    _sum: { quantityDelta: true },
+    orderBy: { _sum: { quantityDelta: "asc" } }, // más negativo = más vendido, arriba
+    take: 5,
+  });
+
+  const ids = grupos.map((g) => g.productId);
+
+  const productos = await prisma.product.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, fullDescription: true },
+  });
+
+  return grupos.map((g) => {
+    const producto = productos.find((p) => p.id === g.productId);
+    return {
+      id: g.productId,
+      nombre: producto?.fullDescription ?? "?",
+      unidades: -(g._sum.quantityDelta ?? 0),
+    };
+  });
+}

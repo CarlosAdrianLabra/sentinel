@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Sidebar } from "@/components/sidebar";
+import { MobileNav } from "@/components/mobile-nav";
 import {
   Geist,
   Geist_Mono,
@@ -55,7 +56,14 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} ${chakraPetch.variable} ${shareTechMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex">
-        <Sidebar />
+        {/* Sidebar fijo — solo desktop */}
+        <div className="hidden md:block">
+          <Sidebar />
+        </div>
+
+        {/* Navegación mobile (hamburguesa + overlay + sidebar deslizante) */}
+        <MobileNav />
+
         <main className="flex-1 overflow-auto">{children}</main>
       </body>
     </html>

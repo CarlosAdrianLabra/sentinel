@@ -13,7 +13,7 @@ export default async function DashboardPage() {
     <div className="p-8 space-y-6">
       <h1 className="font-display text-3xl">Resumen</h1>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="rounded-lg border border-border bg-card p-5">
           <p className="font-hud text-xs uppercase text-muted-foreground">
             Pares en piso

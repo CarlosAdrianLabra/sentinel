@@ -64,7 +64,7 @@ export default function RootLayout({
         {/* Navegación mobile (hamburguesa + overlay + sidebar deslizante) */}
         <MobileNav />
 
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="flex-1 overflow-auto pt-16 md:pt-0">{children}</main>
       </body>
     </html>
   );

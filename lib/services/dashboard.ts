@@ -107,20 +107,31 @@ export async function getRestockAlerts() {
   });
 
   // ordenar por urgencia (menos días primero) y quedarnos con los 5 más urgentes
+  // ordenar por urgencia (menos días primero)
   alertas.sort((a, b) => a.diasRestantes - b.diasRestantes);
+
+  // TODO Carlos: contar cuántas alertas están en zona crítica (< 15 días).
+  //   Se cuenta sobre TODAS (`alertas`), ANTES del slice — si contás después
+  //   del slice ya perdiste las que quedaron fuera del top 5.
+  //   Pista: alertas.filter((a) => a.diasRestantes < 15).length
+  const totalAlertas = alertas.filter((a) => a.diasRestantes < 15).length;
+
+  // top 5 para el hero
   const top = alertas.slice(0, 5);
 
-  // traducir productId a nombre (mismo patrón de "más vendidos")
   const ids = top.map((a) => a.productId);
   const productos = await prisma.product.findMany({
     where: { id: { in: ids } },
     select: { id: true, fullDescription: true },
   });
 
-  return top.map((a) => ({
+  const lista = top.map((a) => ({
     id: a.productId,
     nombre: productos.find((p) => p.id === a.productId)?.fullDescription ?? "?",
     stock: a.stock,
-    dias: Math.round(a.diasRestantes), // redondeamos para mostrar
+    dias: Math.round(a.diasRestantes),
   }));
+
+  // ahora devuelve DOS cosas: la lista del hero y el conteo total
+  return { lista, totalAlertas };
 }

@@ -13,7 +13,7 @@ export default async function DashboardPage() {
     <div className="p-8 space-y-6">
       <h1 className="font-display text-3xl">Resumen</h1>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         <div className="rounded-lg border border-border bg-card p-5">
           <p className="font-hud text-xs uppercase text-muted-foreground">
             Pares en piso
@@ -32,6 +32,12 @@ export default async function DashboardPage() {
           </p>
           <p className="font-display text-3xl mt-2">{kpis.ventasUltimoDia}</p>
         </div>
+        <div className="rounded-lg border border-accent bg-card p-5">
+          <p className="font-hud text-xs uppercase text-muted-foreground">
+            Alertas de resurtido
+          </p>
+          <p className="font-display text-3xl mt-2">{restock.totalAlertas}</p>
+        </div>
       </div>
 
       <div className="rounded-lg border border-border bg-card p-5">
@@ -45,13 +51,14 @@ export default async function DashboardPage() {
           ))}
         </div>
       </div>
+
       <div className="rounded-lg border border-accent bg-card p-5">
         <h2 className="font-display text-lg mb-1">Cuándo resurtir</h2>
         <p className="font-hud text-xs uppercase text-muted-foreground mb-4">
           estimación · mejora con más días de ventas
         </p>
         <div className="space-y-2">
-          {restock.map((r) => (
+          {restock.lista.map((r) => (
             <div key={r.id} className="flex justify-between font-ui text-sm">
               <span>{r.nombre}</span>
               <span className="font-hud">{r.dias} días</span>

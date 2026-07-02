@@ -62,3 +62,65 @@ export async function getTopSellers() {
     };
   });
 }
+
+export async function getRestockAlerts() {
+  // Ingrediente 3: cuántos días DISTINTOS con ventas hay (el divisor).
+  // groupBy por movementDate → cada grupo es una fecha distinta.
+  // La cantidad de grupos = cantidad de días distintos.
+  const diasConVentas = await prisma.inventoryMovement.groupBy({
+    by: ["movementDate"],
+    where: { movementType: "OUT" },
+  });
+
+  const numDias = diasConVentas.length || 1; // || 1 evita dividir por cero
+
+  // (siguen ingredientes 1 y 2 — los agregamos en el próximo paso)
+
+  // Ingrediente 1: stock actual por producto (suma de quantity, agrupado).
+  const stockPorProducto = await prisma.inventoryPosition.groupBy({
+    by: ["productId"],
+    _sum: { quantity: true },
+  });
+
+  // Ingrediente 2: vendido por producto (suma de los OUT, agrupado).
+  // Gemelo del groupBy de "más vendidos", pero sin take (los queremos todos).
+  const vendidoPorProducto = await prisma.inventoryMovement.groupBy({
+    by: ["productId"],
+    where: { movementType: "OUT" },
+    _sum: { quantityDelta: true },
+  });
+
+  // Cruce: por cada producto vendido, calcular días hasta agotarse.
+  const alertas = vendidoPorProducto.map((v) => {
+    // stock de este producto (buscar en la otra lista por id)
+    const stockRow = stockPorProducto.find((s) => s.productId === v.productId);
+    const stock = stockRow?._sum.quantity ?? 0;
+
+    // vendido en positivo (el _sum viene negativo)
+    const vendido = -(v._sum.quantityDelta ?? 0);
+
+    // velocidad diaria y días hasta agotarse
+    const velocidad = vendido / numDias;
+    const diasRestantes = stock / velocidad; // stock ÷ velocidad
+
+    return { productId: v.productId, stock, diasRestantes };
+  });
+
+  // ordenar por urgencia (menos días primero) y quedarnos con los 5 más urgentes
+  alertas.sort((a, b) => a.diasRestantes - b.diasRestantes);
+  const top = alertas.slice(0, 5);
+
+  // traducir productId a nombre (mismo patrón de "más vendidos")
+  const ids = top.map((a) => a.productId);
+  const productos = await prisma.product.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, fullDescription: true },
+  });
+
+  return top.map((a) => ({
+    id: a.productId,
+    nombre: productos.find((p) => p.id === a.productId)?.fullDescription ?? "?",
+    stock: a.stock,
+    dias: Math.round(a.diasRestantes), // redondeamos para mostrar
+  }));
+}

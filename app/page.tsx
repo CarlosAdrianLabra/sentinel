@@ -1,8 +1,13 @@
-import { getDashboardKpis, getTopSellers } from "@/lib/services/dashboard";
+import {
+  getDashboardKpis,
+  getTopSellers,
+  getRestockAlerts,
+} from "@/lib/services/dashboard";
 
 export default async function DashboardPage() {
   const kpis = await getDashboardKpis();
   const topSellers = await getTopSellers();
+  const restock = await getRestockAlerts();
 
   return (
     <div className="p-8 space-y-6">
@@ -36,6 +41,20 @@ export default async function DashboardPage() {
             <div key={s.id} className="flex justify-between font-ui text-sm">
               <span>{s.nombre}</span>
               <span className="font-hud">{s.unidades}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-lg border border-accent bg-card p-5">
+        <h2 className="font-display text-lg mb-1">Cuándo resurtir</h2>
+        <p className="font-hud text-xs uppercase text-muted-foreground mb-4">
+          estimación · mejora con más días de ventas
+        </p>
+        <div className="space-y-2">
+          {restock.map((r) => (
+            <div key={r.id} className="flex justify-between font-ui text-sm">
+              <span>{r.nombre}</span>
+              <span className="font-hud">{r.dias} días</span>
             </div>
           ))}
         </div>

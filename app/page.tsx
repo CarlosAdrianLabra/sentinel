@@ -44,7 +44,10 @@ export default async function DashboardPage() {
         <h2 className="font-display text-lg mb-4">Más vendidos</h2>
         <div className="space-y-2">
           {topSellers.map((s) => (
-            <div key={s.id} className="flex justify-between font-ui text-sm">
+            <div
+              key={s.id}
+              className="flex flex-col md:flex-row md:justify-between font-ui text-sm"
+            >
               <span>{s.nombre}</span>
               <span className="font-hud">{s.unidades}</span>
             </div>
@@ -59,7 +62,10 @@ export default async function DashboardPage() {
         </p>
         <div className="space-y-2">
           {restock.lista.map((r) => (
-            <div key={r.id} className="flex justify-between font-ui text-sm">
+            <div
+              key={r.id}
+              className="flex flex-col md:flex-row md:justify-between font-ui text-sm"
+            >
               <span>{r.nombre}</span>
               <span className="font-hud">{r.dias} días</span>
             </div>

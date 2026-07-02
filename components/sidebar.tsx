@@ -33,10 +33,31 @@ export function Sidebar() {
 
   return (
     <aside className="w-60 shrink-0 border-r border-sidebar-border bg-sidebar p-3 flex flex-col gap-6">
-      <div className="px-2 py-1 font-display text-lg text-sidebar-foreground">
-        SENTINEL
-      </div>
+      <div className="flex items-center gap-3 px-2 py-1">
+        {/* Ojo Centinela: sensor hexagonal con brillo */}
+        <div
+          className="relative grid h-9 w-9 place-items-center"
+          style={{
+            clipPath:
+              "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
+            background:
+              "linear-gradient(135deg, var(--primary), var(--accent))",
+            boxShadow:
+              "0 0 16px color-mix(in oklch, var(--primary) 55%, transparent)",
+          }}
+        >
+          <span
+            className="h-2 w-2 rounded-full bg-white"
+            style={{
+              boxShadow: "0 0 8px white, 0 0 14px var(--accent)",
+            }}
+          ></span>
+        </div>
 
+        <span className="font-display text-lg text-sidebar-foreground">
+          SENTINEL
+        </span>
+      </div>
       {grupos.map((grupo) => (
         <nav key={grupo.titulo} className="flex flex-col gap-1">
           <p className="px-2 text-xs font-hud uppercase tracking-wider text-muted-foreground">

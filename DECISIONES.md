@@ -2365,3 +2365,85 @@ importers, todas con la piel Centinela. Todo pusheado, tree limpio.
 - **Mejoras diferidas:** paginación + filtros en las 3 tablas (una vez, para las
   tres juntas); orden cronológico real en movimientos; mostrar más ítems en el
   hero si el tío lo pide.
+
+## ACTUALIZACIÓN SESIÓN 2026-06-26 (pulido: ojo glow + mobile responsive)
+
+Primera pasada de pulido visual, con la skill de frontend-design. Dos frentes
+grandes cerrados: el ojo glow del logo y TODO el responsive mobile. La estructura
+ya estaba completa (sesión anterior); esto es "poner guapa" y "que funcione en el
+cel del tío". Todo commiteado, tree limpio, sin trabajo a medias.
+
+### Ojo glow del logo (components/sidebar.tsx)
+
+- Sensor hexagonal (clip-path polygon) con gradiente `--primary`→`--accent`
+  (púrpura→magenta) y `box-shadow` con `color-mix(in oklch, var(--primary) 55%,
+transparent)` — glow que siempre matchea la paleta, no color hardcodeado.
+- El "ojo" = span blanco chico con box-shadow de dos capas (blanco cerca +
+  `var(--accent)` difuso) → parece sensor encendido, no círculo plano.
+- Principio de la skill aplicado: gastar la audacia en UN lugar (el sensor), el
+  resto disciplinado. Es el elemento firma del sidebar.
+
+### Responsive mobile — el frente grande
+
+El dashboard se pensó para el cel del tío (usuario showcase) pero solo se había
+visto en desktop. En modo dispositivo (DevTools) estaba ROTO: sidebar comiéndose
+media pantalla, KPIs cortados. Se arregló en 4 piezas, cada una su commit.
+
+**Mecanismo base — prefijos responsive de Tailwind.** `hidden md:block` = oculto
+en mobile, visible desde 768px. `md:hidden` = lo inverso. Con esto se muestra/
+oculta según pantalla SIN medir nada en JS. Es el motor de todo el responsive.
+
+**1. Menú hamburguesa (components/mobile-nav.tsx, nuevo).** El trabajo más grande.
+
+- El sidebar del layout pasa a `hidden md:block` (solo desktop). En mobile lo
+  maneja `MobileNav`.
+- `MobileNav` = Client Component con `useState(abierto)`: botón hamburguesa
+  (`md:hidden`, fixed top-left) + overlay oscuro (cierra al tocar) + sidebar
+  deslizante. El deslizamiento: sidebar SIEMPRE montado pero `-translate-x-full`
+  (fuera de pantalla); al abrir, `translate-x-0` + `transition-transform` → se
+  desliza. No aparece de golpe.
+
+**2. Cerrar menú al tocar link (patrón prop-función).** Bug: el menú quedaba
+abierto tapando la página nueva. El estado (`abierto`) vive en `MobileNav`, pero
+los links viven en `Sidebar` (otro componente). Solución React fundamental: pasar
+la función como prop. `Sidebar` recibe prop OPCIONAL `onNavigate?: () => void`
+(el `?` la hace opcional — desktop no la pasa, mobile sí); el `<Link>` la llama en
+`onClick`. Si llegó (mobile) → cierra; si es undefined (desktop) → React no hace
+nada, sin `if`. El hijo no tiene el estado, recibe un "botón para apretarlo".
+
+**3. KPIs responsivos (app/page.tsx).** `grid-cols-4` fijo se cortaba en 375px.
+Cambiado a `grid-cols-1 md:grid-cols-4` → una columna apilada en mobile, cuatro en
+desktop. Decisión de producto de Carlos: UNA columna (no dos) porque el tío
+batalla para leer en el cel; cards grandes, números enormes, cero esfuerzo.
+
+**4. Padding del título + filas apiladas (app/page.tsx, app/layout.tsx).**
+
+- El botón hamburguesa (fixed) tapaba el `<h1>`. Fix: `pt-16 md:pt-0` en el
+  `<main>` del LAYOUT (no en el título ni en el `p-8` del dashboard) — porque el
+  `<main>` envuelve TODAS las páginas; ponerlo ahí cubre todas de una, no solo el
+  dashboard. Lección: el fix va en el punto único por donde pasan todas.
+- Filas de "cuándo resurtir" y "más vendidos" se partían feo en mobile (nombre
+  largo + número peleando por el ancho). Fix: `flex-col md:flex-row
+md:justify-between` → apilado en mobile (nombre completo arriba, "X días"
+  abajo), en fila en desktop. Decisión de producto: nombre COMPLETO (no cortar con
+  "...") porque el tío necesita saber qué zapato pedir.
+
+### Aprendizaje de proceso
+
+Carlos detectó los 3 problemas mobile (hamburguesa, KPIs, filas) él solo mirando
+la pantalla en modo dispositivo, y los clasificó por gravedad. Es la habilidad de
+"mirá el diseño con ojo crítico" que la skill de frontend valora. También insistió
+en commitear pieza por pieza (Claude reforzó: commits chicos y separados = historia
+legible + red de seguridad; no juntar en un commit gigante "cuando esté todo bien").
+
+### Pendientes de pulido (próxima sesión)
+
+- **Glow del hero "cuándo resurtir":** corchetes de mira, objetivo "bloqueado",
+  retícula — el subidón visual de la maqueta 4. El frente divertido que queda.
+- **Deuda de datos "0 días":** `Math.round` de fracciones < 1 día da "0 días"
+  confuso. Mostrar "< 1 día" o similar.
+- **Overlay mobile** no cubre del todo con el menú abierto (menor, cosmético).
+- **Reset de DB** para demo con números limpios (arrastre de pruebas: 23.995
+  pares en vez de 20.571, etc.).
+- Deuda vieja: paginación + filtros en las 3 tablas; orden cronológico real en
+  movimientos.

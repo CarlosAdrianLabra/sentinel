@@ -33,7 +33,7 @@ export function MobileNav() {
           abierto ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <Sidebar />
+        <Sidebar onNavigate={() => setAbierto(false)} />
       </div>
     </>
   );

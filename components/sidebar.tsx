@@ -28,7 +28,7 @@ const grupos = [
   },
 ];
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
 
   return (
@@ -70,6 +70,7 @@ export function Sidebar() {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={onNavigate}
                 className={`rounded-md px-2 py-2 text-sm font-ui ${
                   activo
                     ? "bg-sidebar-accent text-sidebar-primary"

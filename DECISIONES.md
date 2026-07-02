@@ -2207,3 +2207,161 @@ Shell de navegación en Next: dónde vive el layout persistente (App Router), si
 PC + hamburguesa cel, rutas, tokens del rumbo 4 en los estilos globales. Entra la
 skill de frontend-design. Antes de escribir: ver los archivos actuales (root layout,
 estilos globales, config de Tailwind/fuentes) — principio de verificar contra la realidad.
+
+## ACTUALIZACIÓN SESIÓN 2026-06-25 (estructura visual + dashboard completo)
+
+Sesión larga de código. Se construyó la piel del Modo Centinela y TODA la
+estructura de pantallas que faltaba. Con esto, la estructura del proyecto queda
+cerrada: 4 pantallas navegables + 2 importers. Lo que sigue es pulido, no
+estructura.
+
+### Paleta y fuentes del Centinela (globals.css + layout.tsx)
+
+- **Fuentes:** Orbitron (display/marca/números), Chakra Petch (UI), Share Tech
+  Mono (readouts HUD), vía `next/font/google`. Aprendizaje clave — la cadena de
+  3 eslabones para que una fuente se vuelva clase Tailwind usable:
+  1. `next/font` la carga y expone como CSS var (`--font-orbitron`), inyectada
+     en el `<html>` por className.
+  2. `globals.css` → `@theme inline`: registrar `--font-display:
+var(--font-orbitron)`. ESTE es el paso que convierte la var en la clase.
+     Sin él, la var existe pero la clase `font-display` NO.
+  3. JSX: `className="font-display"`.
+     Regla Tailwind 4: `--font-*` dentro de `@theme` genera clases `font-*`. El
+     nombre después de `--font-` ES el nombre de la clase.
+- **Paleta:** el Modo Centinela vive en `:root` (camino 2 de 3 evaluados). NO
+  se creó un set de tokens aparte (rompería los componentes shadcn que ya leen
+  `--primary`, `--card`, etc.). Se reescribieron los tokens shadcn con la
+  paleta Centinela: void púrpura, primary púrpura (#9D5CFF), accent magenta
+  (#FF2E88), destructive rojo, + sidebar-\*. Los componentes shadcn heredan la
+  piel gratis. Bloque `.dark` BORRADO (la app no tiene switch claro/oscuro —
+  nace siempre Centinela; un `.dark` muerto es deuda).
+- **Fix del `title`/`lang`:** eran restos del template ("Create Next App",
+  lang="en") → "Sentinel — Grupo del Llano", lang="es".
+
+### BUG resuelto: `@import "shadcn/tailwind.css"` pisaba el `:root`
+
+Los tokens de acento (`--primary`, `--accent`) salían GRISES aunque el `:root`
+decía púrpura. Diagnóstico correcto (a la segunda — la primera hipótesis, el
+`.dark`, se descartó mirando el `<html>` en DevTools: no había clase `dark`).
+Causa real: `globals.css` tenía un `@import "shadcn/tailwind.css"` que traía su
+PROPIO `:root` con paleta gris. Dos `:root` = misma especificidad → gana el que
+carga último → el de shadcn pisaba el nuestro. Fix: quitar ese import. **Primer
+conflicto de especificidad CSS por orden de carga.** Método que lo resolvió:
+editar el valor en el inspector para aislar "¿es el formato del valor o algo lo
+pisa?" — herramienta de debugging CSS, no adivinar.
+
+### Shell de navegación (components/sidebar.tsx + layout.tsx)
+
+- **Sidebar = Client Component** (`"use client"`) porque usa `usePathname()`
+  para saber qué link está activo (los hooks solo corren en cliente). El
+  **layout sigue Server**; el sidebar es una "isla" Client adentro. Se aísla el
+  `"use client"` al pedacito que lo necesita, no se contamina todo el layout.
+- **Datos separados del JSX:** los ítems del menú viven en un array de grupos
+  (`{ titulo, items: [{ label, href }] }`) y se pintan con `.map()` — un solo
+  `<Link>` escrito, no 5 repetidos.
+- **Vive en el layout** (al lado de `{children}`) porque el layout no se
+  re-renderiza al navegar → el sidebar no parpadea. Grupos: Acciones /
+  Consultas / Resumen. Resaltado activo por `pathname === href`.
+
+### Pantalla de movimientos (lib/services/movements.ts + app/movements/page.tsx)
+
+- Calcada de `/sales`, 3 diferencias: (1) SIN filtro por `source` (queremos
+  TODOS los movements, OUT + IMPORT_SET); (2) `quantityDelta` CRUDO sin el `-`
+  de ventas (el signo ES info: negativo=salió, positivo=entró — mostrar la
+  realidad, no disfrazarla); (3) columna nueva `tipo` (movementType) para
+  distinguir venta de ajuste (Jesús cazando mermas).
+- **Una sola query** (sales hace dos para filtrar por origen; acá no se filtra).
+- **Orden por `id: "desc"`, no por fecha:** los IMPORT_SET tienen
+  `movementDate` null → con orden por fecha caían al fondo y no se veían. El
+  `id` lo tienen TODOS (autoincrement, nunca null) y crece con el tiempo. Da
+  "lo cargado más recientemente", no "lo más reciente del mundo real" —
+  correcto para auditoría; orden cronológico real = mejora futura.
+- **`take: 100`** (como /inventory y /sales). Distinción registrada: el `take`
+  es estructura mínima (que la tabla no traiga 9.770 filas), NO una feature.
+  Paginación + filtros = mejoras post-estructura, NO se hicieron.
+- Deuda: con la DB de prueba (último import = ventas), las 100 filas son puras
+  OUT (los IMPORT_SET tienen ids más bajos). No es bug — artefacto del orden de
+  carga de la DB de desarrollo.
+
+### Dashboard completo (lib/services/dashboard.ts + app/page.tsx)
+
+La landing del tío. 4 KPIs + más vendidos + el hero. Construido de lo simple a
+lo difícil (KPIs → más vendidos → hero), para llegar a lo difícil con la mano
+hecha.
+
+**Los 4 KPIs** (`getDashboardKpis`, un servicio, una pantalla):
+
+- Pares en piso: `aggregate _sum quantity` de InventoryPosition.
+- Modelos distintos: `product.count()`.
+- Ventas del último día: 2 pasos — `findFirst orderBy movementDate desc` para
+  hallar el último día, luego `count` de OUT en ese día. Etiqueta "último día",
+  NO "hoy" (el último import es del 28/05, no de hoy — no mentir).
+- Alertas de resurtido: sale del hero (ver abajo).
+- **Descartado:** "Valor de inventario" (no hay costos/precios — fuera del MVP).
+  "Sucursales activas" se cambió por "Modelos distintos" (el tío ya sabe cuántas
+  sucursales tiene; es número muerto).
+
+**Más vendidos** (`getTopSellers`): primer `groupBy` — por `productId` (groupBy
+solo agrupa por campos de la MISMA tabla; el nombre vive en Product → 2ª query
+para traducir ids a nombres). Suma `quantityDelta` (negativo), orderBy `asc`
+(más negativo = más vendido, arriba), take 5, signo dado vuelta a positivo en el
+aplanado.
+
+**Hero "cuándo resurtir"** (`getRestockAlerts`) — la query más difícil del
+proyecto. Fórmula (derivada por Carlos): **días hasta agotarse = stock ÷
+velocidad**, donde **velocidad = unidades vendidas ÷ días distintos con
+ventas**.
+
+- Cruza DOS tablas: stock (InventoryPosition, groupBy productId) + vendido
+  (InventoryMovement OUT, groupBy productId), + divisor (días distintos =
+  `groupBy movementDate` y contar los grupos, NO `count()` que cuenta filas).
+- Divisor = días DISTINTOS CON VENTAS, no días de calendario: si Jesús se
+  saltea un día, no se castiga al producto por un hueco que no es suyo. Se mide
+  sobre lo observado.
+- Se itera sobre los productos VENDIDOS (no los con stock): sin ventas nunca se
+  agota, no es alerta.
+- Cruce en JS (`.find` por id), `.sort` por días ascendente (urgente arriba),
+  `.slice(0,5)` para el hero.
+- **KPI de alertas:** conteo de productos con `< 15 días`, calculado sobre TODAS
+  las alertas ANTES del slice (después del slice ya se perdieron). El servicio
+  devuelve `{ lista, totalAlertas }` (cambio de forma: de array a objeto → rompió
+  el `.map` en page.tsx, arreglado a `restock.lista.map`).
+
+**Naturaleza temporal de los datos (aprendizaje de producto):** las ventas son
+ACUMULABLES (cada día sube historia, el hero se afina); el stock es solo
+snapshot del PRESENTE (el legacy no da stock histórico). El hero NUNCA fue
+imposible — el stock de hoy siempre está; lo que madura es la velocidad. Con 1
+día de datos, "cuándo resurtir" da números raros (velocidades de un solo día →
+"0 días" por `Math.round` de fracciones < 1, o cifras enormes para mucho stock).
+NO es bug — es data flaca. Se presenta como "estimación · mejora con más días de
+ventas". Al tío: nace útil (KPIs + más vendidos honestos) y se vuelve mejor
+consejera con el tiempo.
+
+### Deuda registrada esta sesión
+
+- **"0 días" confusos** en el hero: `Math.round` de fracciones < 1 día. Mostrar
+  "< 1 día" o similar. Post-MVP.
+- **DB de desarrollo con arrastre:** pares en piso da 23.995 (no 20.571) por
+  varias corridas de import de prueba; modelos da 2.684 (no 4.594) porque el
+  parser ignora los ~2.000 no-zapato. Correcto para lo que hay en la DB. Para
+  demo con números limpios → resetear DB + un snapshot fresco.
+- **Bugs de anidamiento JSX** (hero y card de alertas quedaron mal anidados,
+  cazados contando `<div>`). Carlos los resolvió. Recordatorio: mover bloques a
+  mano y contar llaves es la habilidad, no depender de que Claude pase el bloque.
+
+### Estado al cierre — ESTRUCTURA COMPLETA
+
+Las 4 pantallas navegables (dashboard, ventas, inventario, movimientos) + los 2
+importers, todas con la piel Centinela. Todo pusheado, tree limpio.
+
+**Falta (todo post-estructura, para sesión dedicada de pulido):**
+
+- **Pulido visual del Centinela:** el ojo glow del logo, corchetes de mira en el
+  hero, glows, retícula, scanlines — la pasada de "poner guapa la app" con la
+  skill de frontend-design. Aplica MÁS al dashboard del tío (showcase, mobile).
+- **Vista mobile del tío:** el dashboard se pensó para su celular pero solo se
+  vio en desktop. Falta mirarlo/ajustarlo en mobile (es SU pantalla).
+- **Deuda de datos:** "0 días" → "< 1 día"; reset de DB para demo limpia.
+- **Mejoras diferidas:** paginación + filtros en las 3 tablas (una vez, para las
+  tres juntas); orden cronológico real en movimientos; mostrar más ítems en el
+  hero si el tío lo pide.

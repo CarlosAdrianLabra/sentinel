@@ -44,7 +44,6 @@ export function ImportForm() {
         Subir y leer
       </button>
 
-      {/* los estados quedan igual por ahora, los vestimos en el próximo paso */}
       {form.status === "idle" && (
         <p className="font-ui text-sm text-muted-foreground">
           Seleccioná un archivo para empezar.

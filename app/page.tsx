@@ -55,7 +55,12 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      <div className="rounded-lg border border-accent bg-card p-5">
+      <div className="relative rounded-lg border border-accent bg-card p-5">
+        <span className="pointer-events-none absolute top-2 left-2 h-4 w-4 border-t-2 border-l-2 border-accent" />
+        <span className="pointer-events-none absolute top-2 right-2 h-4 w-4 border-t-2 border-r-2 border-accent" />
+        <span className="pointer-events-none absolute bottom-2 left-2 h-4 w-4 border-b-2 border-l-2 border-accent" />
+        <span className="pointer-events-none absolute bottom-2 right-2 h-4 w-4 border-b-2 border-r-2 border-accent" />
+
         <h2 className="font-display text-lg mb-1">Cuándo resurtir</h2>
         <p className="font-hud text-xs uppercase text-muted-foreground mb-4">
           estimación · mejora con más días de ventas

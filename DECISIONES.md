@@ -2542,3 +2542,69 @@ Dos temas a resolver antes de compartir la URL con Jesús y el tío:
 - Paginación + filtros en las 3 tablas (una vez, para las tres).
 - Orden cronológico real en movimientos (hoy por id).
 - Doble borde en esquinas del hero (corchetes sobre el border-accent de la card).
+
+## DECISIÓN 2026-07-03: estrategia de deploy (pre-ejecución)
+
+Decisiones tomadas ANTES de tocar código, con el mapa completo sobre la mesa.
+
+### Evidencia que restringió el mapa
+
+- El export semanal real de existencias (rptNewInvetarioGlobalSinVenta.xlsx)
+  pesa ~10 MB. Vercel (serverless) tiene tope de plataforma de 4.5 MB por
+  request, NO configurable — el bodySizeLimit de 10 MB nunca llegaría a aplicar;
+  el archivo rebotaría con 413 antes de tocar la aplicación. Además el import
+  de existencias (~41s) roza timeouts serverless. → Serverless DESCARTADO.
+- Ventas diarias ~0.2 MB: pasan por cualquier lado.
+- Principio reafirmado: verificar contra archivos reales antes de decidir.
+  El tamaño de UN archivo decidió el hosting.
+
+### Hosting: Fly.io (servidor persistente)
+
+- La app corre como proceso Node siempre vivo, con volumen (disco) montado.
+- Criterio decisivo: aprender Docker (doble propósito del proyecto). Railway
+  era menos fricción; Fly enseña más infraestructura.
+- Pricing verificado (2026-07): sin tier gratis (solo $5 de crédito de prueba);
+  máquina 256 MB ~$1.94/mes (probablemente 512 MB–1 GB para parsear el xlsx
+  de 10 MB); volumen $0.15/GB/mes (se cobra aunque la máquina duerma);
+  snapshots de volumen facturables desde ene-2026. Estimación: $3–7 USD/mes.
+- No requiere Docker local en Windows: `fly launch` genera el Dockerfile y el
+  build corre en builders remotos de Fly.
+
+### DB en producción: el archivo SQLite en un volumen de Fly
+
+- Mismo Prisma 7 + adapter better-sqlite3; solo la ruta del archivo pasa a
+  vivir en una env var.
+- Descartados: Turso (su gracia era habilitar serverless; sin serverless queda
+  solo su fricción — Prisma Migrate no corre directo contra Turso) y Postgres
+  gestionado (sobredimensionado para 2 usuarios y 4 sucursales; posible
+  evolución futura).
+- RESTRICCIÓN ARQUITECTÓNICA: SQLite en volumen = exactamente UNA máquina.
+  El volumen se ata a una máquina; dos máquinas (default HA de Fly) = dos
+  discos = dos verdades divergiendo en silencio. Forzar count=1.
+- Backup pasa a ser responsabilidad nuestra (copiar el archivo; los snapshots
+  del volumen existen pero facturan).
+
+### Acceso: contraseña única compartida vía middleware de Next
+
+- Razón: los importers ESCRIBEN. Quien tenga la URL no solo ve ventas reales —
+  puede subir un Excel y ensuciar la base. URL "secreta" descartada.
+- Una sola clave para todos; no distingue Jesús del tío (la app hoy tampoco).
+  La clave vive en env var, nunca en el código ni el repo.
+- Auth real con usuarios/roles sigue diferida (coherente con decisión previa).
+
+### Orden de ejecución acordado
+
+1. Build de producción LOCAL (`pnpm build`) — validar que pasa antes de meter
+   Docker en la ecuación. Si falla, se debuggea en local: una capa a la vez.
+2. Middleware de contraseña (local, testeable) — la app nunca existe pública
+   sin candado.
+3. Deploy a Fly: flyctl, `fly launch`, entender el Dockerfile generado,
+   volumen, env vars, una máquina, migraciones contra el volumen.
+4. Reset + carga fresca DIRECTO en prod: migrar + seed de branches, y cargar
+   snapshot fresco + varios días de ventas VÍA LOS PROPIOS IMPORTERS — la
+   carga de datos ES el test end-to-end del deploy (límite de 10 MB, timeout,
+   escritura al volumen).
+
+Racional del orden: dónde vive la DB define dónde se hace el reset (evita
+trabajo doble); los datos se cargan al final para que estén frescos el día
+de compartir la URL.

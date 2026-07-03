@@ -66,15 +66,29 @@ export default async function DashboardPage() {
           estimación · mejora con más días de ventas
         </p>
         <div className="space-y-2">
-          {restock.lista.map((r) => (
-            <div
-              key={r.id}
-              className="flex flex-col md:flex-row md:justify-between font-ui text-sm"
-            >
-              <span>{r.nombre}</span>
-              <span className="font-hud">{r.dias} días</span>
-            </div>
-          ))}
+          {restock.lista.map((r, i) => {
+            const bloqueado = i === 0; // la primera = la más urgente = en la mira
+            return (
+              <div
+                key={r.id}
+                className={`flex flex-col md:flex-row md:justify-between font-ui text-sm rounded-md px-3 py-2 ${
+                  bloqueado ? "bg-accent/10 border border-accent/40" : ""
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  {bloqueado && (
+                    <span className="font-hud text-xs text-accent">
+                      ● EN MIRA
+                    </span>
+                  )}
+                  {r.nombre}
+                </span>
+                <span className={`font-hud ${bloqueado ? "text-accent" : ""}`}>
+                  {r.dias} días
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

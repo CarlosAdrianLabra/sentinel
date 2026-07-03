@@ -84,7 +84,7 @@ export default async function DashboardPage() {
                   {r.nombre}
                 </span>
                 <span className={`font-hud ${bloqueado ? "text-accent" : ""}`}>
-                  {r.dias} días
+                  {r.dias === 0 ? "< 1 día" : `${r.dias} días`}
                 </span>
               </div>
             );

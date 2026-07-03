@@ -8,19 +8,30 @@ export function MobileNav() {
 
   return (
     <>
-      <button
-        onClick={() => setAbierto(true)}
-        className="md:hidden fixed top-4 left-4 z-50 grid h-10 w-10 place-items-center rounded-md border border-sidebar-border bg-sidebar"
-        aria-label="Abrir menú"
-      >
-        <div className="space-y-1.5">
-          <span className="block h-0.5 w-5 bg-sidebar-foreground"></span>
-          <span className="block h-0.5 w-5 bg-sidebar-foreground"></span>
-          <span className="block h-0.5 w-5 bg-sidebar-foreground"></span>
-        </div>
-      </button>
+      {!abierto && (
+        <button
+          onClick={() => setAbierto(true)}
+          className="md:hidden fixed top-4 left-4 z-50 grid h-10 w-10 place-items-center rounded-md border border-sidebar-border bg-sidebar"
+          aria-label="Abrir menú"
+        >
+          <div className="space-y-1.5">
+            <span className="block h-0.5 w-5 bg-sidebar-foreground"></span>
+            <span className="block h-0.5 w-5 bg-sidebar-foreground"></span>
+            <span className="block h-0.5 w-5 bg-sidebar-foreground"></span>
+          </div>
+        </button>
+      )}
 
-      {/* Overlay — solo cuando abierto, cierra al tocar */}
+      {abierto && (
+        <button
+          onClick={() => setAbierto(false)}
+          className="md:hidden fixed top-4 right-4 z-50 grid h-10 w-10 place-items-center rounded-md border border-sidebar-border bg-sidebar text-sidebar-foreground"
+          aria-label="Cerrar menú"
+        >
+          <span className="font-ui text-xl leading-none">×</span>
+        </button>
+      )}
+
       {abierto && (
         <div
           onClick={() => setAbierto(false)}

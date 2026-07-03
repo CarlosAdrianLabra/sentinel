@@ -32,7 +32,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
 
   return (
-    <aside className="w-60 shrink-0 border-r border-sidebar-border bg-sidebar p-3 flex flex-col gap-6">
+    <aside className="w-60 shrink-0 border-r border-sidebar-border bg-sidebar p-3 flex flex-col gap-6 h-screen">
       <div className="flex items-center gap-3 px-2 py-1">
         {/* Ojo Centinela: sensor hexagonal con brillo */}
         <div

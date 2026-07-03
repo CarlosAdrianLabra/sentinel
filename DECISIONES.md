@@ -2447,3 +2447,98 @@ legible + red de seguridad; no juntar en un commit gigante "cuando esté todo bi
   pares en vez de 20.571, etc.).
 - Deuda vieja: paginación + filtros en las 3 tablas; orden cronológico real en
   movimientos.
+
+## ACTUALIZACIÓN SESIÓN 2026-06-26 bis (pulido visual completo)
+
+Segunda tanda de pulido, continuación del mismo día. El pulido visual quedó
+COMPLETO: toda la app tiene la piel Centinela, funciona en mobile y desktop, cada
+pantalla cuidada. Lo único que queda del proyecto es DEPLOY (subirla) — tema
+aparte, próxima conversación.
+
+### Hero "cuándo resurtir" — completado (app/page.tsx)
+
+- **Corchetes de mira HUD:** 4 esquinas en la card, cada una un `<span>` absolute
+  con solo 2 bordes (ej. `border-t-2 border-l-2` = esquina superior-izq),
+  `border-accent`, `pointer-events-none`. La card es `relative` para anclarlos.
+- **Objetivo "EN MIRA":** la fila más urgente (índice 0 del `.map`, ya viene
+  ordenada por urgencia) se resalta. `.map((r, i) => ...)`, `const bloqueado = i
+=== 0` decide clases: fondo `bg-accent/10` + `border-accent/40`, tag "● EN MIRA"
+  (`{bloqueado && <span>...}`), número en `text-accent`. El resto quietas — el
+  contraste ES el efecto. Skill: gastar la audacia en un lugar.
+- **"< 1 día":** los "0 días" (Math.round de fracciones <1) confundían ("ya se
+  agotó"). Fix de presentación en la VISTA (no el servicio): `{r.dias === 0 ? "< 1
+día" : `${r.dias} días`}`.
+
+### Importers vestidos (app/imports/{ventas,existencias}/\*)
+
+De HTML crudo 1995 a pantallas Centinela. Los DOS iguales (Jesús sube igual a
+ambos; consistencia > variedad), cambiando solo textos.
+
+- **Página:** `<div p-8 space-y-6>` + `<h1 font-display>` + párrafo explicativo (la
+  skill: "pantalla vacía = invitación a actuar"; decirle a Jesús qué subir). Ojo:
+  el párrafo de VENTAS no debe decir "snapshot" (eso es vocabulario de
+  existencias); ventas registra las ventas como salidas.
+- **Input de archivo:** `<input type=file>` es casi inestilable directo. Truco =
+  modificador Tailwind `file:` que estiliza el botón INTERNO (`file:bg-secondary
+file:rounded-md file:border-0` etc). Las clases sin `file:` estilan el texto de
+  al lado.
+- **Botón defensivo (idea de Carlos):** deshabilitar "Subir y leer" si no hay
+  archivo. Estado nuevo `hayArchivo` (useState bool), input con `onChange={(e) =>
+setHayArchivo(e.target.files!.length > 0)}`, botón `disabled={!hayArchivo}` +
+  clases `disabled:opacity-40 disabled:cursor-not-allowed`. El `!` = "disabled
+  cuando NO hay archivo".
+- **4 estados vestidos:** idle (texto tenue), procesando (`text-primary
+animate-pulse`), éxito (bloque `border-green-500/40 bg-green-500/10
+text-green-400`), error (mismo bloque con token `destructive`). Cada estado se VE
+  distinto — la skill: estados son dirección, no mood.
+- Carlos vistió el importer de VENTAS él solo (copiando de existencias). Arco
+  pedagógico: de "dame el código" a "lo copio y ajusto yo".
+
+### Pulido de navegación (components/sidebar.tsx + mobile-nav.tsx)
+
+Carlos detectó los dos bugs él mirando la pantalla:
+
+- **Sidebar no llegaba hasta abajo** (desktop y mobile): el `<aside>` medía solo
+  su contenido. Fix: `h-screen` (alto del viewport) en el `<aside>`. Sirve a
+  ambos usos (desktop fijo + mobile deslizante).
+- **Hamburguesa tapaba el logo en mobile abierto:** el botón `fixed top-4 left-4`
+  se pisaba con el logo del panel. Fix: DOS botones condicionales — hamburguesa
+  cuando `!abierto` (izq), X cuando `abierto`. La X primero se probó en `left-52`
+  (flotaba raro — Carlos lo notó), se movió a `right-4` (esquina sup-der, donde el
+  cerebro busca "cerrar"). Carlos afinó la posición por criterio estético.
+
+### Ojo glow del logo (sesión bis anterior, ya documentado)
+
+Sensor hexagonal (clip-path) púrpura→magenta con glow via color-mix; el "ojo" =
+span blanco con box-shadow de dos capas. Elemento firma del sidebar.
+
+### ESTADO: app COMPLETA (código + visual). Falta solo DEPLOY.
+
+Todas las pantallas con piel Centinela, responsive mobile+desktop, todo pusheado,
+tree limpio (8c741cf).
+
+### PRÓXIMA CONVERSACIÓN: subir Sentinel (deploy)
+
+Dos temas a resolver antes de compartir la URL con Jesús y el tío:
+
+1. **Reset de DB + snapshot limpio:** la DB de desarrollo tiene arrastre de
+   pruebas (23.995 pares en vez de ~20.500; "< 1 día" en casi todo por tener UN
+   solo día de ventas cargado). Para demo con números honestos → reset + un
+   snapshot fresco + idealmente varios días de ventas (para que el hero "cuándo
+   resurtir" dé velocidades creíbles, no de un solo día).
+2. **Acceso / auth:** hoy es UNA sola puerta sin candado (decisión previa: auth
+   diferido). Cualquiera con la URL ve y usa todo. Decidir CONSCIENTEMENTE si para
+   probar en familia está bien así, o si se quiere un candado mínimo antes de
+   compartir. Tener presente: sin auth no hay distinción de usuarios (Jesús vs
+   tío), todo visible para todos.
+3. **Consideración de deploy:** SQLite + `dev.db` local no viaja a un hosting
+   serverless tal cual (el archivo no persiste). Va a haber que pensar dónde vive
+   la DB en producción (¿Turso/libSQL? ¿otro?). Tema técnico a investigar al
+   arrancar el deploy.
+
+### Deuda menor que sigue pendiente (no bloquea deploy)
+
+- Overlay mobile no cubre del todo con menú abierto (cosmético).
+- Paginación + filtros en las 3 tablas (una vez, para las tres).
+- Orden cronológico real en movimientos (hoy por id).
+- Doble borde en esquinas del hero (corchetes sobre el border-accent de la card).

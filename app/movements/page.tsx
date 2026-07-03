@@ -1,4 +1,3 @@
-// app/movements/page.tsx
 import { getMovementsData } from "@/lib/services/movements";
 import {
   Table,
@@ -10,6 +9,7 @@ import {
 } from "@/components/ui/table";
 import { format } from "date-fns";
 
+export const dynamic = "force-dynamic";
 export default async function MovementsPage() {
   const results = await getMovementsData();
 

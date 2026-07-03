@@ -4,6 +4,7 @@ import {
   getRestockAlerts,
 } from "@/lib/services/dashboard";
 
+export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
   const kpis = await getDashboardKpis();
   const topSellers = await getTopSellers();

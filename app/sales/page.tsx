@@ -1,4 +1,3 @@
-// app/sales/page.tsx
 import { getSalesData } from "@/lib/services/sales";
 import {
   Table,
@@ -10,6 +9,7 @@ import {
 } from "@/components/ui/table";
 import { format } from "date-fns";
 
+export const dynamic = "force-dynamic";
 export default async function SalesPage() {
   const results = await getSalesData();
 

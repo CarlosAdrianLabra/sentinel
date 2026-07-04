@@ -1,6 +1,4 @@
 import type { Metadata } from "next";
-import { Sidebar } from "@/components/sidebar";
-import { MobileNav } from "@/components/mobile-nav";
 import {
   Geist,
   Geist_Mono,
@@ -41,7 +39,7 @@ const shareTechMono = Share_Tech_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sentinel — Grupo del Llano", // ← era "Create Next App"
+  title: "Sentinel — Grupo del Llano",
   description: "Control operacional de inventario y ventas",
 };
 
@@ -52,20 +50,10 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="es" // ← era "en"
+      lang="es"
       className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} ${chakraPetch.variable} ${shareTechMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex">
-        {/* Sidebar fijo — solo desktop */}
-        <div className="hidden md:block">
-          <Sidebar />
-        </div>
-
-        {/* Navegación mobile (hamburguesa + overlay + sidebar deslizante) */}
-        <MobileNav />
-
-        <main className="flex-1 overflow-auto pt-16 md:pt-0">{children}</main>
-      </body>
+      <body className="min-h-full">{children}</body>
     </html>
   );
 }

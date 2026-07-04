@@ -2608,3 +2608,104 @@ Decisiones tomadas ANTES de tocar código, con el mapa completo sobre la mesa.
 Racional del orden: dónde vive la DB define dónde se hace el reset (evita
 trabajo doble); los datos se cargan al final para que estén frescos el día
 de compartir la URL.
+
+## ACTUALIZACIÓN SESIÓN 2026-07-03 (deploy fases 1–2: build de producción + candado)
+
+### Fase 1 — build de producción local ✓
+
+- `pnpm build` pasó a la primera; TypeScript strict sin quejas nuevas.
+- CONCEPTO NUEVO — static vs dynamic: Next decide EN EL BUILD si una página
+  se "congela" (○): ejecuta el Server Component UNA sola vez, queries de
+  Prisma incluidas, y guarda el HTML resultante. Decide por las APIs que la
+  página usa (searchParams, cookies...), no por lo que los datos significan
+  — las queries de Prisma le son opacas (a diferencia de fetch).
+- Bomba desactivada: 8 rutas salían ○, con los KPIs del dashboard horneados
+  dentro del HTML con los datos del dev.db del momento del build. Jesús
+  habría visto números congelados para siempre. Peor: en la fase Docker,
+  el build corre SIN dev.db → el prerender habría reventado el build.
+- Fix: `export const dynamic = "force-dynamic"` en las 5 vistas que leen la
+  base (/, /sales, /movements, /branches, /imports). Los formularios de los
+  importers y /login quedan ○ A PROPÓSITO: HTML puro que no depende de datos.
+  Static no es malo — es incorrecto para páginas cuyo contenido ES la base.
+- `pnpm start` verificado: sirve el artefacto ya construido (Ready ~176ms,
+  no compila nada al navegar). El dashboard consultó la base EN VIVO y mostró
+  los números sucios — que los muestre es la prueba de que ƒ funciona; la
+  limpieza de datos es asunto de la Fase 4.
+
+### Fase 2 — candado de acceso ✓
+
+- DATO DE ECOSISTEMA (verificado contra docs actuales, no memoria): Next 16
+  renombró middleware.ts → proxy.ts. La convención vieja quedó deprecada y
+  un middleware.ts olvidado puede ser IGNORADO EN SILENCIO = rutas
+  "protegidas" abiertas sin error. Los tutoriales viejos dicen "middleware":
+  mismo concepto, nombre nuevo.
+- Modelo mental clave: cada ruta es una puerta de calle independiente — no
+  existe "la" entrada como en Bubble. Por eso el chequeo vive en la entrada
+  del servidor (proxy.ts intercepta TODO request), no en una landing.
+- Arquitectura en 3 piezas:
+  - lib/auth/sello.ts — SHA-256 hex de la clave. En la cookie NO va la clave
+    en texto plano ni un "sí" falsificable: va una derivación que solo quien
+    conoce la clave puede fabricar.
+  - proxy.ts (raíz del proyecto) — sin sello válido → redirect a /login.
+    Matcher con regex negativo: todo salvo /login y assets internos de Next.
+  - app/login/ — Server Action + useActionState, MISMO patrón FormState de
+    los importers (union discriminado; acá sin variante "éxito" porque en el
+    éxito la función nunca retorna: redirect() corta la ejecución).
+- Cookie: httpOnly, secure en prod, sameSite lax, maxAge 30 días. maxAge la
+  hace PERSISTENTE (sobrevive el cierre del navegador — verificado); sin esa
+  línea sería cookie de sesión y el tío tipearía la clave cada mañana.
+- La clave vive en SENTINEL_PASSWORD (.env, cubierto por `.env*` en
+  .gitignore — verificado antes de escribirla).
+- Route group (app)/: los layouts son muñecas rusas — el root envolvía
+  también a /login con sidebar, así que un anónimo veía el plano del
+  edificio (importers, consultas, dashboard) sin loguearse. Fix: root layout
+  queda como chasis (html/fuentes/globals.css); el sidebar se mudó a
+  app/(app)/layout.tsx envolviendo dashboard + 5 vistas. Los paréntesis =
+  carpeta organizativa que NO crea segmento de URL → URLs intactas
+  (verificado: tabla del build idéntica + línea nueva "ƒ Proxy (Middleware)"
+  = el portero viaja dentro del artefacto).
+- Verificación dura del candado (la mitad importante es que SIN llave NO
+  abre): incógnito rebota a /login limpio y sin sidebar; clave mala →
+  mensaje de error; clave buena → dashboard; sesión persiste tras cerrar
+  el navegador.
+
+### Aprendizajes de lenguaje/plataforma
+
+- typeof para primitivos, instanceof para instancias de clase:
+  "hola" instanceof String === false. El guard correcto para strings es
+  typeof x === "string" (instanceof File funcionaba porque File SÍ es clase).
+- Tipo vs valor — LA joroba conceptual viniendo de no-code: los tipos se
+  BORRAN al compilar; en runtime no existe ningún objeto LoginState. A una
+  variante no se "accede": se CONSTRUYE ({ status: "idle" }). A un valor
+  vivo en una variable SÍ se accede (estado.mensaje).
+- throw vs return: throw = explosión para lo que no debería pasar; return
+  de la variante error = falla esperada del negocio. Una clave incorrecta
+  es un martes, no una excepción.
+- redirect() funciona LANZANDO una excepción especial: va fuera de
+  try/catch, o el catch se la traga y el login "no hace nada".
+- Contrato letra por letra: formData.get("clave") ↔ name="clave" del input.
+  Sin name, el dato no viaja.
+- .env se lee al ARRANCAR el server: reiniciar dev tras editarlo.
+- Convención App Router: la carpeta define la URL, el archivo se llama
+  siempre page.tsx; <html>/<body> viven SOLO en el root layout.
+- Truco de testing: dos navegadores = dos usuarios (cookies separadas).
+  Chrome sin sesión + Brave logueado permitió verificar ambos mundos a la vez.
+
+### Deuda registrada
+
+- Unificar naming: login quedó con action.ts (singular), importers con
+  actions.ts — barato hoy, caro en seis meses.
+- La deuda de UX "botón pending" quedó pagada en login ("Verificando…" +
+  disabled); sigue pendiente en los dos importers.
+
+### PRÓXIMO PASO — Fase 3: Fly
+
+- Carlos por su cuenta: cuenta en fly.io (pide tarjeta; sin tier gratis,
+  estimado $3–7/mes) + instalar flyctl en PowerShell + verificar
+  `fly version` y `fly auth login`.
+- ⚠️ NO correr `fly launch` todavía: antes hay que preparar la app — hay
+  una trampa específica de SQLite-en-volumen con las migraciones que se
+  explica ANTES de que el wizard la esconda, más decisiones que el launch
+  pregunta y conviene llegar con respuesta.
+- Después de Fly quedan: secrets en prod (SENTINEL_PASSWORD, DATABASE_URL),
+  y Fase 4: reset + carga fresca directo en prod vía los propios importers.

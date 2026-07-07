@@ -31,7 +31,7 @@ COPY prisma.config.ts ./
 RUN pnpm install --frozen-lockfile --prod=false
 
 # Generate Prisma Client
-RUN npx prisma generate
+RUN DATABASE_URL="file:/tmp/placeholder.db" npx prisma generate
 
 # Copy application code
 COPY . .

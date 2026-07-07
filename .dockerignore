@@ -50,3 +50,5 @@ prisma/*.db-journal
 
 # Outputs de debug del parser
 *.txt
+
+DECISIONES.md

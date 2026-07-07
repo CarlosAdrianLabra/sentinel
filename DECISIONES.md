@@ -2709,3 +2709,171 @@ de compartir la URL.
   pregunta y conviene llegar con respuesta.
 - Después de Fly quedan: secrets en prod (SENTINEL_PASSWORD, DATABASE_URL),
   y Fase 4: reset + carga fresca directo en prod vía los propios importers.
+
+## ACTUALIZACIÓN SESIÓN 2026-07-06 (deploy fase 3: Fly.io — Sentinel EN PRODUCCIÓN + arranque fase 4)
+
+### Resultado
+
+- Sentinel vive en https://sentinel-gdl.fly.dev con candado verificado.
+- App `sentinel-gdl`, región dfw (Dallas), UNA máquina shared-cpu-1x/1GB,
+  volumen `data` (1 GB) montado en /data, SQLite en /data/sqlite.db,
+  4 migraciones aplicadas contra el volumen, seed de 6 sucursales corrido.
+- Commits: scaffolding de Fly + fixes de Dockerfile; fix placeholder
+  DATABASE_URL. Tree limpio.
+
+### La trampa SQLite-en-volumen (explicada ANTES del wizard, como se acordó)
+
+- La app existe en 3 momentos, cada uno en una MÁQUINA DISTINTA con SU disco:
+  1. Build (builder remoto que arma la imagen) — sin volumen.
+  2. release_command (máquina EFÍMERA: corre un comando y muere) — Fly NO
+     monta volúmenes en efímeras.
+  3. Runtime (la máquina real) — ÚNICO momento con el volumen montado.
+- `prisma migrate deploy` solo abre lo que diga DATABASE_URL; si el archivo
+  no existe, SQLite lo crea VACÍO sin avisar. Migrar en release_command =
+  migrar un disco que muere con la efímera; la app luego abre el volumen
+  virgen → `no such table`... con deploy EN VERDE.
+- Solución: migrar en RUNTIME, dentro del comando de arranque, ANTES de
+  next start (semántica &&: si la migración falla, el server no levanta).
+
+### Plot twist: el generador de Fly ya conocía el patrón
+
+- `fly launch` detectó Next+Prisma+SQLite y NO generó release_command.
+  Generó `docker-entrypoint.js`: al arrancar la máquina real corre
+  `prisma migrate deploy` + `next build --experimental-build-mode generate`
+  y recién entonces `next start`. Es la solución deducida, implementada.
+- Build partido en dos: `compile` en el Dockerfile (momento 1, sin DB) y
+  `generate` en el entrypoint (momento 3, con DB) — la bomba del prerender
+  de Fase 1 resuelta genéricamente; nuestro force-dynamic ya la desactivaba
+  (cinturón y tirantes).
+- fly.toml trae [[mounts]] (volumen `data` → /data, auto-extend hasta
+  10 GB) y el Dockerfile fija ENV DATABASE_URL="file:///data/sqlite.db".
+
+### fly launch: cómo se corrió de verdad
+
+- Primera corrida ABORTADA con Ctrl+C: el flujo actual ya NO pregunta
+  "deploy now?" — tras generar archivos deploya solo; además traía un
+  bucket Tigris no pedido. La garantía real es la bandera `--no-deploy`.
+- Relanzado `fly launch --no-deploy` + "tweak settings" en navegador:
+  nombre sentinel-gdl, región dfw, Tigris disabled, VM 1GB, puerto 3000.
+- Región: qro NO existe en el catálogo real (dato desactualizado de
+  Claude); dfw es la más cercana a CDMX y el wizard la midió desde la
+  conexión real. Realidad 1, memoria 0.
+- `.github/` (workflow de CI que redeploya en cada push) BORRADO —
+  CI/CD diferido; se regenera trivial cuando toque.
+
+### Fixes al Dockerfile generado (pensaba en layout Prisma 6)
+
+- Regla COPY: con un directorio como origen copia el CONTENIDO, no la
+  carpeta. `COPY prisma .` soltaba schema.prisma en /app raíz → el output
+  "../generated/prisma" caía en /generated (raíz del disco, fuera del
+  proyecto) y prisma.config.ts ni había llegado al momento del generate.
+- Fix (2 líneas): `COPY prisma ./prisma` + `COPY prisma.config.ts ./` —
+  la imagen replica el mapa exacto de Windows; toda ruta relativa
+  significa lo mismo en ambos mundos.
+- `.dockerignore` generado (clon del .gitignore): .env* (la clave no
+  viaja), node_modules (binarios Windows fuera), prisma/*.db (datos dev
+  fuera), \*.xlsx (datos del negocio fuera). `/generated` excluido además
+  PROTEGE el cliente generado en Linux: COPY . . no lo pisa.
+
+### REGLA NUEVA: runtime vs build-time en package.json
+
+- Todo lo que se EJECUTA en runtime vive en `dependencies`; las
+  devDependencies mueren con `pnpm prune --prod` antes de empaquetar.
+- Caso cazado a tiempo: prisma.config.ts hace `import "dotenv/config"` y
+  el entrypoint carga ese config EN RUNTIME → dotenv en devDependencies =
+  ERR_MODULE_NOT_FOUND al primer arranque, con build y deploy EN VERDE.
+  Fix: dotenv movido a dependencies.
+- `prisma` (CLI) ya estaba en dependencies → sobrevive el prune
+  (verificado contra package.json, no contra memoria).
+- Verificar ediciones: "Already up to date" de pnpm NO confirma nada;
+  el diff de package.json + pnpm-lock.yaml modificado, sí.
+- tsx sigue en devDependencies A PROPÓSITO (ver seed abajo).
+
+### Predicción cobrada: env() estricto en build
+
+- `RUN npx prisma generate` (momento 1) murió: PrismaConfigEnvError —
+  env("DATABASE_URL") EXIGE que la variable exista aunque generate nunca
+  abra la base. (Bonus: el error confirmó que prisma.config.ts ya se
+  encontraba — los fixes de COPY funcionaron.)
+- Fix: `RUN DATABASE_URL="file:/tmp/placeholder.db" npx prisma generate`.
+  Sintaxis shell `VAR=valor comando` = la variable vive solo esa línea.
+  Valor falso a propósito; la URL real llega en el momento 3 vía ENV.
+
+### Volumen, secret y deploy
+
+- `fly volumes create data --region dfw --size 1` — el warning "create
+  two or more volumes" se responde SÍ CON INTENCIÓN: un volumen no es
+  descuido, es la arquitectura (un disco, una verdad). Zone 6ec0 (pinned
+  a host físico). Snapshots automáticos activos (retention 5) — facturan;
+  la estrategia de backup real queda para después de Fase 4.
+- `fly secrets set SENTINEL_PASSWORD=...` (staged hasta el primer
+  deploy). DATABASE_URL NO es secret: es ruta, no credencial — la fija
+  el Dockerfile.
+- Deploy: `fly deploy --ha=false` — la regla UNA MÁQUINA explícita en la
+  bandera, no colgada del warning de facturación que apagó HA por
+  accidente.
+- Docker en vivo: capas cacheadas (build 2 tardó 7s vs 67s → el ORDEN de
+  las líneas importa); el build corre en Depot; `fly deploy` sube la
+  CARPETA LOCAL filtrada por .dockerignore, no el repo → se puede iterar
+  sin commitear.
+- WARNING "app not listening on expected address" = flyctl impaciente:
+  miró a ~2s y el entrypoint tarda ~18s (migrate + generate) antes del
+  Ready. No es falla — documentado para no asustarse en futuros deploys.
+
+### Verificación en prod
+
+- Logs del primer arranque: volumen inicializado y formateado; "Loaded
+  Prisma config" (el fix de dotenv cobrándose); sqlite.db creado en
+  /data; 4 migraciones aplicadas; tabla de rutas idéntica al build local
+  con "ƒ Proxy (Middleware)".
+- Incógnito → rebota a /login sin sidebar; clave del secret → entra.
+- Dashboard, /sales, /movements y /branches EN CERO = base recién nacida
+  sana (dev.db bloqueado por .dockerignore; seed aún sin correr).
+
+### Fase 4 arrancada: seed en prod (salida B elegida)
+
+- Problema diagnosticado por Carlos: el seed lo ejecuta tsx (según
+  prisma.config.ts) y tsx vive en devDependencies → NO existe tras el
+  prune ("command not found": falta el PROGRAMA, distinto de
+  ERR_MODULE_NOT_FOUND, que es un paquete importado).
+- Salidas evaluadas: A) mover tsx a dependencies (patrón dotenv; viaja
+  para siempre en la imagen para correr una vez) vs B) túnel SSH + npx
+  descargando tsx al vuelo (efímero; repo intacto; tradeoff: paso manual
+  → se documenta acá). ELEGIDA B.
+- PROCEDIMIENTO RE-SEED EN PROD (la memoria vive en el repo):
+  1. Despertar la máquina (abrir la URL; el auto-stop la duerme).
+  2. `fly ssh console`
+  3. `npx tsx prisma/seed.ts` → aceptar la descarga de tsx.
+  4. `exit`
+- Resultado: 6 sucursales en prod. REALIDAD 2, MEMORIAS 0: Claude predijo
+  4, Carlos predijo 6, branches.ts tenía 6 (LUISREY id 3 y ABRIL id 9
+  existían). "Verificar contra archivos reales" aplica a TODOS, incluido
+  quien dicta el principio.
+
+### Tradeoff pendiente: auto-stop
+
+- fly.toml: auto_stop_machines='stop' + min_machines_running=0 → la
+  máquina duerme sola y la visita siguiente paga ~15–20s de arranque
+  (el entrypoint completo re-corre). Evaluar con el tío en la ecuación:
+  min_machines_running=1 (siempre despierta, más costo) vs dejarlo así.
+
+### PRÓXIMO PASO — Fase 4 (resto): carga de datos vía importers
+
+- Carlos trae de la oficina (pedírselos a Jesús): snapshot semanal de
+  existencias (~10 MB) + ventas diarias.
+- El snapshot de 10 MB ES el test end-to-end diseñado: es el archivo que
+  mató a Vercel — valida límite de tamaño, timeout (~41s en local) y
+  escritura al volumen.
+- PREGUNTA ABIERTA que abre la próxima sesión (Carlos responde ANTES de
+  subir nada): ¿en qué ORDEN se suben snapshot vs ventas, y ventas de qué
+  FECHAS relativas a la fecha del snapshot? Pista: una venta del martes
+  con un snapshot del miércoles — ¿ya está adentro de la foto o no?
+
+### Deuda viva
+
+- Unificar naming action.ts / actions.ts (previa).
+- Spinner/disabled en los dos importers (previa).
+- CI/CD (workflow de Fly) diferido.
+- Estrategia de backup del volumen (los snapshots automáticos facturan
+  y no son estrategia).
+- Evaluar auto-stop vs min_machines_running=1.

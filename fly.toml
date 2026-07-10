@@ -24,6 +24,6 @@ primary_region = 'dfw'
   processes = ['app']
 
 [[vm]]
-  memory = '1gb'
+  memory = '2gb'
+  cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 1024

@@ -28,6 +28,7 @@ model Branch {
 
   positions InventoryPosition[]
   movements InventoryMovement[]
+  importJobs ImportJob[]
 }
 
 /// SKU: el producto completo tal como se distingue en el negocio.
@@ -136,6 +137,8 @@ model ImportJob {
   finishedAt    DateTime?
   snapshotDate  DateTime? /// timestamp del header "Impresion:" del archivo legacy
   createdAt     DateTime  @default(now())
+  branchId      Int?
+  branch        Branch? @relation(fields: [branchId], references: [id])
 
   @@index([status])
   @@index([createdAt])

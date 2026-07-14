@@ -2,7 +2,7 @@ import * as XLSX from "xlsx";
 import { z } from "zod";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../generated/prisma/client";
-import { parse } from "date-fns";
+import { format, parse } from "date-fns";
 import { pathToFileURL } from "url";
 import { readFileSync } from "node:fs";
 
@@ -191,6 +191,7 @@ async function buildBranchMap(): Promise<Record<string, number>> {
 async function createImportJob(
   fileName: string,
   snapshotDate: Date,
+  branchId: number,
 ): Promise<number> {
   const job = await prisma.importJob.create({
     data: {
@@ -199,6 +200,7 @@ async function createImportJob(
       fileName: fileName,
       startedAt: new Date(),
       snapshotDate: snapshotDate,
+      branchId: branchId,
     },
   });
   return job.id;
@@ -315,24 +317,49 @@ export async function runExistenciasImport(
     const snapshotDateString = extractSnapshotDate(rows);
     const snapshotDate = parseSnapshotDate(snapshotDateString);
 
-    // Validador no-regresivo: rechaza un snapshot más viejo que el último importado.
-    const lastInventory = await prisma.importJob.findFirst({
-      where: { source: "legacy_inventory", status: "COMPLETED" },
-      orderBy: { snapshotDate: "desc" },
-    });
-    const lastInventoryDate = lastInventory?.snapshotDate;
-    if (lastInventoryDate && snapshotDate < lastInventoryDate) {
-      throw new Error(
-        `Este import es del ${snapshotDate}, más viejo que el último (${lastInventoryDate}). Rechazado.`,
-      );
-    }
-
+    // El parseo va ANTES del guard: la sucursal del archivo solo existe
+    // por-fila adentro de las tuplas, y el guard la necesita para scopear.
     const rawTuples = parseProducts(rows);
     const tuples = validateTuples(rawTuples);
 
     const branchMap = await buildBranchMap();
 
-    importJobId = await createImportJob(fileName, snapshotDate);
+    // Derivar LA sucursal del archivo (exports single-branch, Plan B).
+    const legacyIds = new Set(tuples.map((t) => t.branchLegacyId));
+    if (legacyIds.size === 0) {
+      throw new Error(
+        "El archivo no trae ninguna posición de inventario (0 tuplas).",
+      );
+    }
+    if (legacyIds.size > 1) {
+      throw new Error(
+        `Se esperaba un archivo de UNA sucursal; trae ${legacyIds.size}: ${[...legacyIds].join(", ")}.`,
+      );
+    }
+    const fileLegacyId = [...legacyIds][0];
+    const fileBranchId = branchMap[String(fileLegacyId)];
+    if (!fileBranchId) {
+      throw new Error(`Sucursal desconocida: legacyStoreId=${fileLegacyId}`);
+    }
+
+    // Validador no-regresivo POR SUCURSAL: rechaza un snapshot más viejo
+    // que el último importado de ESA sucursal (no el último global).
+    const lastInventory = await prisma.importJob.findFirst({
+      where: {
+        source: "legacy_inventory",
+        status: "COMPLETED",
+        branchId: fileBranchId,
+      },
+      orderBy: { snapshotDate: "desc" },
+    });
+    const lastInventoryDate = lastInventory?.snapshotDate;
+    if (lastInventoryDate && snapshotDate < lastInventoryDate) {
+      throw new Error(
+        `Este import es del ${format(snapshotDate, "dd/MM/yyyy HH:mm")}, más viejo que el último de esta sucursal (${format(lastInventoryDate, "dd/MM/yyyy HH:mm")}). Rechazado.`,
+      );
+    }
+
+    importJobId = await createImportJob(fileName, snapshotDate, fileBranchId);
     const processedCount = await persistTuples(tuples, branchMap, importJobId);
 
     await prisma.importJob.update({

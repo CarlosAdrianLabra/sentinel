@@ -27,6 +27,7 @@ const SIZE_SCAN_START = 29; // las tallas arrancan en col 29 (antes hay columnas
 const SIZE_SCAN_END = 50; // tope con margen (sample llega a ~42)
 const SIZE_MIN = 500; // talla 5.0
 const SIZE_MAX = 4500; // talla 45.0
+const CANT_COL = 2; // columna CANT. del bloque (venta bruta de la fila)
 
 function normalizeQualifier(raw: string): string {
   const s = raw.replace(/[^0-9]/g, "");
@@ -80,25 +81,31 @@ function parseSales(rows: unknown[][], movementDate: Date): SaleTuple[] {
 
       // RAMA 3 — fila de datos (qualifier con dígito)
       else if (typeof blockCell === "string" && /\d/.test(blockCell)) {
-        const legacyStoreId = normalizeQualifier(blockCell);
-        const isActive = !productName.endsWith(" *");
-        const fullDescription = isActive
-          ? productName
-          : productName.replace(/ \*$/, "").trim();
+        // Guard: solo filas que son venta real (CANT > 0).
+        // Cambios (CANT 0) y correcciones (CANT negativo) traen celdas
+        // en la matriz de tallas que NO son ventas → la fila se brinca entera.
+        const cantidad = rows[j][CANT_COL];
+        if (typeof cantidad === "number" && cantidad > 0) {
+          const legacyStoreId = normalizeQualifier(blockCell);
+          const isActive = !productName.endsWith(" *");
+          const fullDescription = isActive
+            ? productName
+            : productName.replace(/ \*$/, "").trim();
 
-        for (const claveStr of Object.keys(sizeByColumn)) {
-          const col = Number(claveStr);
-          const talla = sizeByColumn[col];
-          const cantidadCell = rows[j][col];
+          for (const claveStr of Object.keys(sizeByColumn)) {
+            const col = Number(claveStr);
+            const talla = sizeByColumn[col];
+            const cantidadCell = rows[j][col];
 
-          if (typeof cantidadCell === "number" && cantidadCell > 0) {
-            tuples.push({
-              branchLegacyId: legacyStoreId,
-              fullDescription,
-              size: talla,
-              quantity: cantidadCell,
-              movementDate,
-            });
+            if (typeof cantidadCell === "number" && cantidadCell > 0) {
+              tuples.push({
+                branchLegacyId: legacyStoreId,
+                fullDescription,
+                size: talla,
+                quantity: cantidadCell,
+                movementDate,
+              });
+            }
           }
         }
       }

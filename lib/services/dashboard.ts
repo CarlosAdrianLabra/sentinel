@@ -24,12 +24,15 @@ export async function getDashboardKpis() {
   //   movementType "OUT" Y movementDate === ultimoDia.
   //   Si ultimoDia es null (no hay ventas), ventasUltimoDia = 0.
   //   Pista: prisma.inventoryMovement.count({ where: { ... } })
-  const ventasUltimoDia =
+  const ventasAgg =
     ultimoDia == null
-      ? 0
-      : await prisma.inventoryMovement.count({
+      ? null
+      : await prisma.inventoryMovement.aggregate({
           where: { movementType: "OUT", movementDate: ultimoDia },
+          _sum: { quantityDelta: true },
         });
+
+  const ventasUltimoDia = -(ventasAgg?._sum.quantityDelta ?? 0);
   return {
     paresEnPiso,
     modelosDistintos,

@@ -50,7 +50,7 @@ export default async function ImportsPage() {
   return (
     <main className="p-8 space-y-8">
       <h1 className="text-3xl">Imports</h1>
-      <Card className={freshnessStyle.cardClass}>
+      <Card>
         <CardHeader>
           <CardTitle>{freshnessStyle.label}</CardTitle>
         </CardHeader>

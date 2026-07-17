@@ -1,17 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { importVentas } from "./actions";
-import { type FormState } from "./types";
+import { type FormState, type ImportResult } from "./types";
 
-export function ImportForm() {
+type ImportFormProps = {
+  action: (formData: FormData) => Promise<ImportResult>;
+};
+
+export function ImportForm({ action }: ImportFormProps) {
   const [form, setForm] = useState<FormState>({ status: "idle" });
   const [hayArchivo, setHayArchivo] = useState(false);
 
   async function handleSubmit(formData: FormData) {
     setForm({ status: "procesando" });
     try {
-      const res = await importVentas(formData);
+      const res = await action(formData);
       setForm({ status: "exito", result: res });
     } catch (e) {
       const mensaje = e instanceof Error ? e.message : String(e);

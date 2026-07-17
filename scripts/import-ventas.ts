@@ -267,6 +267,7 @@ type VentasImportResult = {
 export async function runVentasImport(
   workbook: XLSX.WorkBook,
   fileName: string,
+  allowBackdated: boolean = false,
 ): Promise<VentasImportResult> {
   let importJobId: number | undefined;
   try {
@@ -291,20 +292,22 @@ export async function runVentasImport(
         `Ya existe un import de ventas COMPLETED para ${fechaFinalString} (ImportJob ${existing.id}). Abortando para no duplicar.`,
       );
     }
-    const lastSales = await prisma.importJob.findFirst({
-      where: {
-        source: "legacy_sales",
-        status: "COMPLETED",
-      },
-      orderBy: {
-        snapshotDate: "desc",
-      },
-    });
-    const lastSalesDate = lastSales?.snapshotDate;
-    if (lastSalesDate && movementDate < lastSalesDate) {
-      throw new Error(
-        `Este import tiene una fecha de ${movementDate} y la fecha del import mas nuevo es de ${lastSalesDate} por lo tanto este import es antiguo`,
-      );
+    if (!allowBackdated) {
+      const lastSales = await prisma.importJob.findFirst({
+        where: {
+          source: "legacy_sales",
+          status: "COMPLETED",
+        },
+        orderBy: {
+          snapshotDate: "desc",
+        },
+      });
+      const lastSalesDate = lastSales?.snapshotDate;
+      if (lastSalesDate && movementDate < lastSalesDate) {
+        throw new Error(
+          `Este import tiene una fecha de ${movementDate} y la fecha del import mas nuevo es de ${lastSalesDate} por lo tanto este import es antiguo`,
+        );
+      }
     }
 
     // Parsear y validar

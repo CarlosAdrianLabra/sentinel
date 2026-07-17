@@ -1,4 +1,5 @@
 import { ImportForm } from "./import-form";
+import { importVentas } from "./actions";
 
 export default function VentasImportPage() {
   return (
@@ -8,7 +9,7 @@ export default function VentasImportPage() {
         Sube el reporte de ventas del legacy (.xlsx). Sentinel lee el archivo y
         registra las ventas del día como salidas de inventario.
       </p>
-      <ImportForm />
+      <ImportForm action={importVentas} />
     </div>
   );
 }

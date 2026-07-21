@@ -164,6 +164,17 @@ async function buildBranchMap(): Promise<Record<string, number>> {
   return map;
 }
 
+function resolveBranchId(
+  branchMap: Record<string, number>,
+  branchLegacyId: string,
+): number {
+  const branchId = branchMap[branchLegacyId];
+  if (!branchId) {
+    throw new Error(`Sucursal desconocida: legacyStoreId=${branchLegacyId}`);
+  }
+  return branchId;
+}
+
 function getFilePathFromArgs(): string {
   const filePath = process.argv[2];
   if (!filePath) {
@@ -225,12 +236,7 @@ async function persistSales(
 
   await prisma.$transaction(async (tx) => {
     for (const tuple of tuples) {
-      const branchId = branchMap[tuple.branchLegacyId];
-      if (!branchId) {
-        throw new Error(
-          `Sucursal desconocida: legacyStoreId=${tuple.branchLegacyId}`,
-        );
-      }
+      const branchId = resolveBranchId(branchMap, tuple.branchLegacyId);
 
       const product = await tx.product.upsert({
         where: { fullDescription: tuple.fullDescription },
@@ -279,19 +285,6 @@ export async function runVentasImport(
     const fechaFinalString = extractFechaFinalString(rows);
     const movementDate = parseFechaFinal(fechaFinalString);
 
-    // ── IDEMPOTENCIA (opción 3): ¿ya existe un import de ventas de esta fecha?
-    const existing = await prisma.importJob.findFirst({
-      where: {
-        source: "legacy_sales",
-        status: "COMPLETED",
-        snapshotDate: movementDate,
-      },
-    });
-    if (existing) {
-      throw new Error(
-        `Ya existe un import de ventas COMPLETED para ${fechaFinalString} (ImportJob ${existing.id}). Abortando para no duplicar.`,
-      );
-    }
     if (!allowBackdated) {
       const lastSales = await prisma.importJob.findFirst({
         where: {
@@ -316,6 +309,36 @@ export async function runVentasImport(
 
     const branchMap = await buildBranchMap();
 
+    // ── IDEMPOTENCIA POR SUCURSAL-DÍA ──
+    // El invariante NO es "un import por fecha" (una fecha puede llegar en
+    // pedazos, una sucursal a la vez), sino "una sucursal-día una sola vez".
+    // Se mide contra InventoryMovement, no contra ImportJob: importa lo que
+    // REALMENTE está en la base, no lo que un job dice que hizo.
+    const entrantes = new Set(
+      tuples.map((t) => resolveBranchId(branchMap, t.branchLegacyId)),
+    );
+
+    const yaCargadas = await prisma.inventoryMovement.findMany({
+      where: { movementDate, movementType: "OUT" },
+      distinct: ["branchId"],
+      select: { branchId: true },
+    });
+
+    const choque = yaCargadas
+      .map((m) => m.branchId)
+      .filter((id) => entrantes.has(id));
+
+    if (choque.length > 0) {
+      // Consulta cara SOLO en el camino de error: nombres para el humano.
+      const sucursales = await prisma.branch.findMany({
+        where: { id: { in: choque } },
+        select: { name: true },
+      });
+      const nombres = sucursales.map((b) => b.name).join(", ");
+      throw new Error(
+        `Ya hay ventas del ${fechaFinalString} cargadas para: ${nombres}. Este archivo también las trae. Abortando para no duplicar.`,
+      );
+    }
     // Crear ImportJob (después del chequeo de idempotencia)
     importJobId = await createImportJob(fileName, movementDate);
 
